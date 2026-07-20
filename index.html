@@ -22,6 +22,11 @@
     <button class="btn-validate" onclick="validatePattern()">✓ 검증</button>
     <button class="btn-export" onclick="exportYAML()">📥 YAML 내보내기</button>
     <button class="btn-export btn-export-audio" onclick="exportAudio()">🎵 비트 WAV 내보내기</button>
+    <button class="btn-export" onclick="exportProject()" title="드럼 키트 위치·타임라인 비트를 파일로 저장(JSON) — 나중에 그대로 불러올 수 있음">💾 프로젝트 저장</button>
+    <label class="audio-label" title="저장했던 프로젝트 파일(JSON)을 불러와 드럼 키트·타임라인을 그대로 복원합니다">
+      📂 프로젝트 불러오기
+      <input type="file" id="project-file" accept=".json,application/json" style="display:none" onchange="importProject(this)">
+    </label>
     <label class="audio-label" title="MP3 / WAV / OGG 파일을 로드하면 재생 시 함께 흘러나옵니다">
       🎵 음악 로드
       <input type="file" id="audio-file" accept="audio/*" style="display:none" onchange="loadAudioFile(this)">
@@ -248,7 +253,7 @@
   }
 }
 </script>
-<script src="js/intro_outro_presets.js?v=10"></script>
-<script type="module" src="js/app.js?v=10"></script>
+<script src="js/intro_outro_presets.js?v=12"></script>
+<script type="module" src="js/app.js?v=12"></script>
 </body>
 </html>

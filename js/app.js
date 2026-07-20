@@ -1150,6 +1150,98 @@ window.exportYAML = function () {
 };
 
 // ═══════════════════════════════════════════════════════════════
+//  프로젝트 저장/불러오기 (JSON) — 드럼 키트 위치·타격 팔·타임라인 비트를
+//  그대로 파일로 내보냈다가 나중에(또는 다른 브라우저에서) 복원한다.
+//  "YAML 내보내기"는 ROS2용 최종 관절 궤적이라 드럼 위치 정보가 없어서
+//  별도로 둔다 — 이쪽이 실제 "프로젝트 소스"에 가깝다.
+// ═══════════════════════════════════════════════════════════════
+window.exportProject = function () {
+  const data = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    drumKit: drumKit.map(d => ({ id: d.id, name: d.name, type: d.type, arm: d.arm, pos: { x: d.pos.x, y: d.pos.y, z: d.pos.z } })),
+    timelineEvents: timelineEvents.map(e => ({ drumId: e.drumId, beat: e.beat, vel: e.vel ?? 'medium', arm: e.arm })),
+    settings: {
+      bpm, beatsPerBar, totalBars,
+      introChecked: document.getElementById('chk-intro')?.checked ?? true,
+      outroChecked: document.getElementById('chk-outro')?.checked ?? true,
+      introStyleId: document.getElementById('intro-style-sel')?.value || 'spread',
+      stickJ7Offset, contactBoostMax,
+    },
+  };
+  const json = JSON.stringify(data, null, 2);
+  const ts = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 15);
+  const a  = document.createElement('a');
+  a.href     = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
+  a.download = `magicexe_project_${ts}.json`;
+  a.click();
+  setStatus(`프로젝트 저장 완료 — 드럼 ${drumKit.length}개 · 비트 ${timelineEvents.length}개`);
+};
+
+window.importProject = function (input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data.drumKit) || !data.drumKit.length) {
+        throw new Error('drumKit 데이터가 없습니다');
+      }
+
+      drumKit = data.drumKit.map(d => ({
+        id: d.id, name: d.name, type: d.type, arm: d.arm,
+        pos: { x: +d.pos.x, y: +d.pos.y, z: +d.pos.z },
+      }));
+      nextDrumId = Math.max(
+        DEFAULT_DRUM_KIT.length,
+        ...drumKit.map(d => (parseInt(String(d.id).replace(/\D/g, ''), 10) || 0) + 1)
+      );
+
+      if (Array.isArray(data.timelineEvents)) {
+        timelineEvents = data.timelineEvents.map(ev => ({
+          drumId: ev.drumId,
+          beat: +ev.beat,
+          vel: ev.vel ?? 'medium',
+          ...((ev.arm === 'L' || ev.arm === 'R') ? { arm: ev.arm } : {}),
+        }));
+      }
+
+      const s = data.settings;
+      if (s) {
+        if (s.bpm != null) { bpm = s.bpm; const el = document.getElementById('bpm-inp'); if (el) el.value = bpm; }
+        if (s.beatsPerBar != null) { beatsPerBar = s.beatsPerBar; const el = document.getElementById('meter-sel'); if (el) el.value = beatsPerBar; }
+        if (s.totalBars != null) { totalBars = s.totalBars; const el = document.getElementById('bars-inp'); if (el) el.value = totalBars; }
+        if (s.introChecked != null) { const el = document.getElementById('chk-intro'); if (el) el.checked = s.introChecked; }
+        if (s.outroChecked != null) { const el = document.getElementById('chk-outro'); if (el) el.checked = s.outroChecked; }
+        if (s.introStyleId != null) { const el = document.getElementById('intro-style-sel'); if (el) el.value = s.introStyleId; }
+        if (s.stickJ7Offset != null) { stickJ7Offset = s.stickJ7Offset; _setSliderPair('stick-j7-slider', 'stick-j7-val', stickJ7Offset); }
+        if (s.contactBoostMax != null) { contactBoostMax = s.contactBoostMax; _setSliderPair('contact-boost-slider', 'contact-boost-val', contactBoostMax); }
+      }
+
+      saveDrumKit();
+      saveTimeline();
+      saveSettings();
+      renderDrumList();
+      rebuildDrumSpheres();
+      renderPresetDropdown();
+      renderTimeline();
+      updateTLInfo();
+      _playKFs = buildFinalKeyframes();
+      _playDur = _playKFs.totalTime;
+      const scrubEl = document.getElementById('scrubber');
+      if (scrubEl) scrubEl.max = _playDur;
+
+      setStatus(`프로젝트 불러오기 완료 — 드럼 ${drumKit.length}개 · 비트 ${timelineEvents.length}개`);
+    } catch (err) {
+      setStatus('프로젝트 불러오기 실패: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+};
+
+// ═══════════════════════════════════════════════════════════════
 //  비트 오디오 내보내기 (WAV — OfflineAudioContext 렌더링)
 // ═══════════════════════════════════════════════════════════════
 
