@@ -2564,7 +2564,13 @@ let videoOffset = 0;
 function _refVideoEl() { return document.getElementById('ref-video-el'); }
 
 window.toggleRefVideoPanel = function () {
-  document.getElementById('ref-video-popup')?.classList.toggle('open');
+  document.getElementById('video-panel')?.classList.toggle('collapsed');
+};
+window.toggleDrumPanel = function () {
+  document.getElementById('drum-panel')?.classList.toggle('collapsed');
+};
+window.toggleStrokePanel = function () {
+  document.getElementById('stroke-panel')?.classList.toggle('collapsed');
 };
 
 window.loadRefVideo = function (input) {
