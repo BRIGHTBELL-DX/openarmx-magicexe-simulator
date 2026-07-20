@@ -33,7 +33,6 @@ const VEL_GLOW = {
   medium: c => `0 0 6px ${c}66`,
   hard:   c => `0 0 11px ${c}bb`,
 };
-const ARM_COLORS = { L: '#3a7ae0', R: '#e04030' }; // 팔레트 기본 왼팔/오른팔 색과 동일 — 타임라인 비트의 팔 표시용
 
 // ═══════════════════════════════════════════════════════════════
 //  드럼 키트 상태
@@ -2820,7 +2819,8 @@ function renderTimeline() {
 
   drumKit.forEach(drum => {
     const lane = document.createElement('div');
-    lane.className       = 'tl-lane';
+    const splitArm = drum.type !== 'kick'; // 킥은 팔이 없어 구분 안 함
+    lane.className       = 'tl-lane' + (splitArm ? ' split' : '');
     lane.style.width     = totalW + 'px';
     lane.dataset.drumId  = drum.id;
     const typeInfo = DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
@@ -2849,20 +2849,20 @@ function renderTimeline() {
     timelineEvents.filter(e => e.drumId === drum.id).forEach(evt => {
       const vel = evt.vel ?? 'medium';
       const x   = (evt.beat - 1) * PX_PER_BEAT;
-      const effArm = _effArm(evt) || drum.arm;
+      const effArm  = _effArm(evt) || drum.arm;
+      const armCls  = !splitArm ? 'arm-none' : effArm === 'L' ? 'arm-L' : 'arm-R';
       const hit = document.createElement('div');
-      hit.className      = `tl-hit vel-${vel}`;
+      hit.className      = `tl-hit vel-${vel} ${armCls}`;
       hit.dataset.vel    = vel;
       hit.dataset.key    = `${drum.id}_${evt.beat}`;
       hit.style.left     = x + 'px';
       hit.style.background  = typeInfo.color;
       hit.style.boxShadow   = VEL_GLOW[vel](typeInfo.color);
-      if (drum.type !== 'kick') hit.style.borderBottom = `3px solid ${ARM_COLORS[effArm] || '#666'}`;
       const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
       const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
       hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
       hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat); });
-      hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (drum.type !== 'kick') _showArmDropdown(hit, drum.id, evt.beat, effArm); });
+      hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(hit, drum.id, evt.beat, effArm); });
       hit.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); removeEvent(drum.id, evt.beat); });
       lane.appendChild(hit);
     });
@@ -2879,17 +2879,25 @@ function renderTimeline() {
       return parseFloat(clamp(beat, 1, totalBeats + 1).toFixed(4));
     }
 
+    // 레인의 위 절반=왼팔, 아래 절반=오른팔 — 클릭한 세로 위치로 팔을 정한다.
+    // 킥처럼 팔 구분이 없는 레인은 undefined(= 드럼 기본 팔) 반환.
+    function armFromEvent(e) {
+      if (!splitArm) return undefined;
+      const rect = lane.getBoundingClientRect();
+      return (e.clientY - rect.top) < rect.height / 2 ? 'L' : 'R';
+    }
+
     lane.addEventListener('click', e => {
       if (e.target.classList.contains('tl-hit')) return;
       if (_tlDragOccurred) { _tlDragOccurred = false; return; } // 드래그 직후의 클릭은 무시(중복 토글 방지)
-      addEvent(drum.id, beatFromEvent(e));
+      addEvent(drum.id, beatFromEvent(e), armFromEvent(e));
     });
 
     // 드래그로 일정 간격마다 반복 채우기 — mousemove/mouseup은 document에 한 번만
     // 등록해 커서가 레인 밖으로 살짝 벗어나도 드래그가 끊기지 않게 한다.
     lane.addEventListener('mousedown', e => {
       if (e.button !== 0 || e.target.classList.contains('tl-hit')) return;
-      _tlDrag = { drumId: drum.id, lane, startBeat: beatFromEvent(e), filled: new Set() };
+      _tlDrag = { drumId: drum.id, lane, startBeat: beatFromEvent(e), arm: armFromEvent(e), filled: new Set() };
     });
 
     lanesEl.appendChild(lane);
@@ -2909,7 +2917,8 @@ function _effArm(evt) {
   return d?.arm;
 }
 
-function addEvent(drumId, beat) {
+// arm을 명시하면(레인의 클릭된 절반) 그 팔로 배치, 생략하면 드럼 기본 팔 사용.
+function addEvent(drumId, beat, arm) {
   // ── 토글: 같은 드럼 같은 박자 → 제거
   const sameIdx = timelineEvents.findIndex(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
   if (sameIdx >= 0) {
@@ -2927,32 +2936,34 @@ function addEvent(drumId, beat) {
     return;
   }
 
+  const useArm = (arm === 'L' || arm === 'R') ? arm : drum.arm;
+
   // ── 규칙 1: 동일 팔이 같은 박자에 이미 있으면 배치 불가 (팔 오버라이드 반영)
   const sameArmConflict = timelineEvents.find(e => {
     if (Math.abs(e.beat - beat) >= 0.01) return false;
     const ed = drumKit.find(d => d.id === e.drumId);
-    return ed && ed.type !== 'kick' && _effArm(e) === drum.arm;
+    return ed && ed.type !== 'kick' && _effArm(e) === useArm;
   });
 
   if (sameArmConflict) {
-    const armKr    = drum.arm === 'L' ? '왼팔' : '오른팔';
-    const otherArm = drum.arm === 'L' ? 'R' : 'L';
-    const otherKr  = drum.arm === 'L' ? '오른팔' : '왼팔';
+    const armKr    = useArm === 'L' ? '왼팔' : '오른팔';
+    const otherArm = useArm === 'L' ? 'R' : 'L';
+    const otherKr  = useArm === 'L' ? '오른팔' : '왼팔';
     // 반대팔로 이 드럼을 칠 수 있는지 체크
     const distOther = reachDist({ ...drum, arm: otherArm });
     const hint = distOther <= STICK_REACH
-      ? ` — ${otherKr}은 도달 가능(${distOther.toFixed(2)}m)하니 이 비트를 더블클릭해 팔을 바꿔보세요`
+      ? ` — ${otherKr}은 도달 가능(${distOther.toFixed(2)}m)하니 레인 반대쪽 절반을 클릭해보세요`
       : ` (${otherKr}도 도달 불가 ${distOther.toFixed(2)}m)`;
     setStatus(`❌ beat ${beat.toFixed(2)}: ${armKr}은 이미 이 박자에 다른 드럼을 칩니다${hint}`);
     return;
   }
 
   // ── 규칙 2: 동일 타이밍에 양팔이 모두 배정됐으면 3번째 불가
-  const bothArmsUsed = ['L', 'R'].every(arm =>
+  const bothArmsUsed = ['L', 'R'].every(a =>
     timelineEvents.some(e => {
       if (Math.abs(e.beat - beat) >= 0.01) return false;
       const ed = drumKit.find(d => d.id === e.drumId);
-      return ed && ed.type !== 'kick' && _effArm(e) === arm;
+      return ed && ed.type !== 'kick' && _effArm(e) === a;
     })
   );
   if (bothArmsUsed) {
@@ -2960,7 +2971,7 @@ function addEvent(drumId, beat) {
     return;
   }
 
-  timelineEvents.push({ drumId, beat, vel: defaultVel, arm: drum.arm });
+  timelineEvents.push({ drumId, beat, vel: defaultVel, arm: useArm });
   _commitTimeline();
 }
 
@@ -3028,9 +3039,9 @@ function removeEvent(drumId, beat) {
 
 // 이미 있으면 건드리지 않고 새 것만 추가 — addEvent는 같은 자리를 다시 누르면
 // 토글(삭제)하므로, 드래그로 같은 위치를 여러 번 지나가도 지워지지 않게 분리.
-function addEventIfMissing(drumId, beat) {
+function addEventIfMissing(drumId, beat, arm) {
   const exists = timelineEvents.some(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
-  if (!exists) addEvent(drumId, beat);
+  if (!exists) addEvent(drumId, beat, arm);
 }
 
 // ── 타임라인 레인 드래그 → 지정 간격마다 반복 채우기 ─────────────────
@@ -3074,7 +3085,7 @@ document.addEventListener('mousemove', e => {
     if (filled.has(key)) continue;
     filled.add(key);
     const before = timelineEvents.length;
-    addEventIfMissing(_tlDrag.drumId, beat);
+    addEventIfMissing(_tlDrag.drumId, beat, _tlDrag.arm);
     if (timelineEvents.length !== before) addedAny = true;
   }
   if (addedAny) _commitTimeline();
