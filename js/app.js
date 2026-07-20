@@ -2524,7 +2524,21 @@ async function _autoLoadDefaultSong() {
     _audioBuf = await _audioCtx.decodeAudioData(buf);
     const nameEl = document.getElementById('audio-name');
     if (nameEl) nameEl.textContent = 'MAGIC.EXE (Mastering)';
-    setStatus(`곡 자동 로드: MAGIC.EXE (Mastering) (${_audioBuf.duration.toFixed(1)}s)`);
+
+    // 곡이 고정 1개이므로, 타임라인(마디 수)이 곡 전체 길이를 항상
+    // 덮도록 자동으로 맞춘다 — 기존 마디 수가 이미 곡보다 길면 그대로 둔다.
+    const barDur     = (60 / bpm) * beatsPerBar;
+    const neededBars = Math.ceil(_audioBuf.duration / barDur) + 1; // 여유 1마디
+    if (totalBars < neededBars) {
+      totalBars = neededBars;
+      const barsEl = document.getElementById('bars-inp');
+      if (barsEl) barsEl.value = totalBars;
+      renderTimeline();
+      updateTLInfo();
+      saveSettings();
+    }
+
+    setStatus(`곡 자동 로드: MAGIC.EXE (Mastering) (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
   } catch (err) {
     setStatus('기본 곡 자동 로드 실패: ' + err.message);
   }
@@ -2957,23 +2971,20 @@ function setEventArm(drumId, beat, newArm) {
     return;
   }
 
-  // reachDist()는 직선거리 기반 대략적 추정이라, 팔 관절 한계(_IK_LIMITS)
-  // 때문에 거리상 닿아도 실제 IK가 못 풀리는 경우(특히 반대쪽 팔로 넘어가는
-  // 자세)가 있다 — 실제 IK 수렴 결과(_solveStickStrike().ok)로 최종 확인한다.
-  const dist = reachDist({ ...drum, arm: newArm });
-  if (dist > STICK_REACH) {
-    setStatus(`❌ [${drum.name}] ${newArm === 'L' ? '왼팔' : '오른팔'}로는 도달 불가 (${dist.toFixed(2)}m)`);
-    return;
-  }
+  // 드럼 위치가 아직 미정이라(추후 조정 예정) 지금 자세가 안 풀린다고
+  // 배정 자체를 막지는 않는다 — 모든 악기를 양팔 어디로든 배정할 수
+  // 있어야 하므로, 도달/IK 문제는 경고만 띄우고 그대로 적용한다.
+  const dist   = reachDist({ ...drum, arm: newArm });
   const solved = _solveStickStrike({ ...drum, arm: newArm }, evt.vel ?? 'medium');
-  if (!solved.ok) {
-    setStatus(`❌ [${drum.name}] ${newArm === 'L' ? '왼팔' : '오른팔'}로는 자세를 풀 수 없습니다(관절 한계) — 드럼 위치를 조정해야 할 수 있습니다`);
-    return;
-  }
+  const warn = dist > STICK_REACH
+    ? ` ⚠ 현재 드럼 위치 기준 도달 거리 초과(${dist.toFixed(2)}m) — 위치 조정 필요`
+    : !solved.ok
+      ? ` ⚠ 현재 드럼 위치 기준 IK 미수렴 — 위치 조정 필요`
+      : '';
 
   evt.arm = newArm;
   _commitTimeline();
-  setStatus(`[${drum.name}] beat ${beat.toFixed(2)} → ${newArm === 'L' ? '왼팔' : '오른팔'}로 변경`);
+  setStatus(`[${drum.name}] beat ${beat.toFixed(2)} → ${newArm === 'L' ? '왼팔' : '오른팔'}로 변경${warn}`);
 }
 
 // 비트를 더블클릭하면 그 자리에 L/R 드롭다운을 띄워 타격 팔을 바로 바꿀 수 있게 한다.
@@ -3210,15 +3221,8 @@ document.addEventListener('click', e => {
   }
 });
 
-// 참고 영상 팝업 외부 클릭 시 닫기
-document.addEventListener('click', e => {
-  const btn   = document.getElementById('ref-video-toggle-btn');
-  const popup = document.getElementById('ref-video-popup');
-  if (popup && popup.classList.contains('open') &&
-      !popup.contains(e.target) && e.target !== btn) {
-    popup.classList.remove('open');
-  }
-});
+// 참고 영상 패널은 비트를 찍는 동안 계속 봐야 하므로(타임라인 클릭 등
+// 외부 클릭에) 자동으로 닫히지 않는다 — 🎬 토글 버튼으로만 열고 닫는다.
 
 // 프리셋 버튼을 SKIN_PRESETS 데이터에서 동적 생성
 function renderSkinPresets() {
