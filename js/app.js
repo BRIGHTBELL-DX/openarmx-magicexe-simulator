@@ -2431,6 +2431,18 @@ function _updatePlayhead(t) {
     : Math.min(totalW, (drumT / drumDur) * totalW);
 
   ph.style.left = x.toFixed(1) + 'px';
+
+  // 재생 중엔 재생헤드가 항상 보이도록 타임라인을 자동 스크롤(가로 폭이
+  // 곡 전체 길이만큼 매우 넓어서 수동 스크롤만으로는 따라가기 어려움) —
+  // 뷰포트 좌측에서 30% 지점에 재생헤드가 오도록 유지한다.
+  if (isPlaying) {
+    const scrollEl = document.getElementById('tl-scroll');
+    if (scrollEl) {
+      const viewW = scrollEl.clientWidth;
+      const target = clamp(x - viewW * 0.3, 0, Math.max(0, totalW - viewW));
+      scrollEl.scrollLeft = target;
+    }
+  }
 }
 
 // ── 메인 애니메이션 루프 ─────────────────────────────────────
