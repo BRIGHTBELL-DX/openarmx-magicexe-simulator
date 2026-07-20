@@ -2862,7 +2862,7 @@ function renderTimeline() {
       const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
       hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
       hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat); });
-      hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(hit, drum.id, evt.beat, effArm); });
+      hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(e.clientX, e.clientY, drum.id, evt.beat, effArm); });
       hit.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); removeEvent(drum.id, evt.beat); });
       lane.appendChild(hit);
     });
@@ -3010,18 +3010,26 @@ function setEventArm(drumId, beat, newArm) {
   setStatus(`[${drum.name}] beat ${beat.toFixed(2)} → ${newArm === 'L' ? '왼팔' : '오른팔'}로 변경${warn}`);
 }
 
-// 비트를 더블클릭하면 그 자리에 L/R 드롭다운을 띄워 타격 팔을 바로 바꿀 수 있게 한다.
-function _showArmDropdown(anchorEl, drumId, beat, currentArm) {
+// 비트를 더블클릭하면 그 자리(마우스 커서 기준)에 L/R 드롭다운을 띄워
+// 타격 팔을 바로 바꿀 수 있게 한다. 레인이 화면 아래쪽 끝에 가까우면
+// 화면 밖으로 나가지 않도록 위치를 clamp한다(marker 자체는 8px짜리
+// 반쪽 높이라 anchor 기준으로 잡으면 위치가 어긋나 보였음).
+function _showArmDropdown(clientX, clientY, drumId, beat, currentArm) {
   document.querySelectorAll('.tl-arm-dropdown').forEach(el => el.remove());
-  const rect = anchorEl.getBoundingClientRect();
   const sel = document.createElement('select');
   sel.className = 'tl-arm-dropdown';
   sel.innerHTML = '<option value="L">L (왼팔)</option><option value="R">R (오른팔)</option>';
   sel.value = currentArm;
   sel.style.position = 'fixed';
-  sel.style.left = rect.left + 'px';
-  sel.style.top  = (rect.bottom + 4) + 'px';
-  document.body.appendChild(sel);
+  document.body.appendChild(sel); // 실제 크기를 재려면 먼저 붙여야 함
+
+  const w = sel.offsetWidth  || 90;
+  const h = sel.offsetHeight || 24;
+  const left = Math.min(Math.max(4, clientX - w / 2), window.innerWidth  - w - 4);
+  const top  = Math.min(Math.max(4, clientY + 8), window.innerHeight - h - 4);
+  sel.style.left = left + 'px';
+  sel.style.top  = top + 'px';
+
   sel.focus();
   const close = () => sel.remove();
   sel.addEventListener('change', () => { setEventArm(drumId, beat, sel.value); close(); });
