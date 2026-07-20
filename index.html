@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenArmX MAGIC.EXE 드럼 타임라인</title>
+<link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+
+<!-- ══ 헤더 ══ -->
+<div id="header">
+  <div id="header-title">🥁 OpenArmX MAGIC.EXE 드럼 타임라인</div>
+  <div id="header-controls">
+    <label>BPM <input id="bpm-inp" type="number" min="40" max="240" value="136" step="1"></label>
+    <label>박자 <select id="meter-sel">
+      <option value="4">4/4</option>
+      <option value="3">3/4</option>
+    </select></label>
+    <label>마디 <input id="bars-inp" type="number" min="1" max="400" value="8" step="1"></label>
+    <button id="apply-btn" onclick="applyPattern()">▶ 적용 &amp; 재생</button>
+    <button class="btn-validate" onclick="validatePattern()">✓ 검증</button>
+    <button class="btn-export" onclick="exportYAML()">📥 YAML 내보내기</button>
+    <button class="btn-export btn-export-audio" onclick="exportAudio()">🎵 비트 WAV 내보내기</button>
+    <label class="audio-label" title="MP3 / WAV / OGG 파일을 로드하면 재생 시 함께 흘러나옵니다">
+      🎵 음악 로드
+      <input type="file" id="audio-file" accept="audio/*" style="display:none" onchange="loadAudioFile(this)">
+    </label>
+    <span id="audio-name">파일 없음</span>
+  </div>
+</div>
+
+<!-- ══ 메인 레이아웃 ══ -->
+<div id="main">
+
+  <!-- 왼쪽: 드럼 키트 설정 -->
+  <div id="drum-panel">
+    <div class="panel-header">
+      🥁 드럼 키트 구성
+      <button class="btn-sm" onclick="addDrum()">+ 추가</button>
+    </div>
+    <div class="preset-row">
+      <select id="preset-sel" onchange="applyDrumPreset(this.value)"></select>
+      <button class="btn-sm" onclick="saveDrumPreset()" title="현재 드럼 위치를 이 이름으로 저장(같은 이름 있으면 덮어씀)">💾 저장</button>
+      <button class="btn-sm" onclick="deleteDrumPreset()" title="선택한 템플릿 삭제">삭제</button>
+    </div>
+    <div class="panel-hint">
+      Y 양수 = 왼팔 방향 / Y 음수 = 오른팔 방향<br>
+      Z = 높이 (로봇 어깨 ≈ 0.698m)
+    </div>
+
+    <div id="drum-list"></div>
+  </div>
+
+  <!-- 오른쪽: 스트로크 튜닝 -->
+  <div id="stroke-panel">
+    <div class="panel-header">🎯 스트로크 튜닝</div>
+    <div class="panel-hint">
+      타격점(J1~J7)은 고정 — 들어 올리는 높이(J7)만 조절<br>
+      + : 더 높이 들어 강하게 · − : 낮게 들어 약하게
+    </div>
+    <div class="stroke-sliders">
+
+      <div class="stroke-row">
+        <div class="stroke-label">타격 강도(들어올림) <span class="stroke-joint">J7</span></div>
+        <div class="stroke-ctrl">
+          <input id="stick-j7-slider" class="stroke-slider" type="range" min="-0.6" max="0.6" step="0.02" value="0">
+          <input id="stick-j7-val" class="stroke-val-inp" type="number" min="-0.6" max="0.6" step="0.02" value="0">
+        </div>
+      </div>
+
+      <div class="stroke-row" title="드럼 헤드에 스틱이 더 수직으로 꽂히도록 타격 시 J7을 추가로 보정 — 값을 올릴수록 드럼별로 필요한 만큼(다른 드럼과 무관하게) 자동으로 더 크게 보정합니다. 타격점(위치)은 그대로 유지됩니다.">
+        <div class="stroke-label">타격 접촉각 보정 <span class="stroke-joint">J7</span></div>
+        <div class="stroke-ctrl">
+          <input id="contact-boost-slider" class="stroke-slider" type="range" min="0.3" max="1.5" step="0.1" value="0.6">
+          <input id="contact-boost-val" class="stroke-val-inp" type="number" min="0.3" max="1.5" step="0.1" value="0.6">
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 중앙: 3D 뷰포트 -->
+  <div id="viewport">
+
+    <!-- 참고 영상 플로팅 버튼 & 팝업 -->
+    <button id="ref-video-toggle-btn" onclick="toggleRefVideoPanel()" title="참고 영상">🎬</button>
+    <div id="ref-video-popup">
+      <div class="pal-popup-header">참고 영상</div>
+      <label class="audio-label" style="display:inline-flex">
+        📼 영상 업로드
+        <input type="file" id="ref-video-file" accept="video/*" style="display:none" onchange="loadRefVideo(this)">
+      </label>
+      <span id="ref-video-name">파일 없음</span>
+      <video id="ref-video-el" playsinline></video>
+      <div class="pal-popup-section">
+        <div class="pal-popup-label" title="영상에서 음악이 실제로 시작하는 지점(초) — 재생 위치 t=0일 때 영상이 이 시점부터 재생되도록 맞춥니다">영상 오프셋(초)</div>
+        <div class="stroke-ctrl">
+          <input id="ref-video-offset" type="number" step="0.1" value="0" oninput="setRefVideoOffset(this.value)">
+          <button class="btn-sm" onclick="toggleRefVideoMute()" id="ref-video-mute-btn" title="영상 자체 소리 켜기/끄기">🔊</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 씬 팔레트 플로팅 버튼 & 팝업 -->
+    <button id="pal-toggle-btn" onclick="togglePalette()" title="씬 팔레트">🎨</button>
+    <div id="pal-popup">
+      <div class="pal-popup-header">씬 팔레트</div>
+
+      <div class="pal-popup-section">
+        <div class="pal-popup-label">배경</div>
+        <div class="pal-popup-row">
+          <div class="pal-presets">
+            <button class="preset-dot" style="background:#06060c" title="심우주"    onclick="setSceneBg('#06060c');syncBgPicker('#06060c')"></button>
+            <button class="preset-dot" style="background:#040d1a" title="딥 네이비" onclick="setSceneBg('#040d1a');syncBgPicker('#040d1a')"></button>
+            <button class="preset-dot" style="background:#0a0a0a" title="블랙"      onclick="setSceneBg('#0a0a0a');syncBgPicker('#0a0a0a')"></button>
+            <button class="preset-dot" style="background:#1a1228" title="퍼플 다크" onclick="setSceneBg('#1a1228');syncBgPicker('#1a1228')"></button>
+            <button class="preset-dot" style="background:#06100a" title="포레스트"  onclick="setSceneBg('#06100a');syncBgPicker('#06100a')"></button>
+            <button class="preset-dot" style="background:#e8eaf2;border-color:#9999bb" title="화이트룸" onclick="setSceneBg('#e8eaf2');syncBgPicker('#e8eaf2')"></button>
+          </div>
+          <input type="color" id="pal-bg" value="#f0f2f5" title="직접 선택" oninput="setSceneBg(this.value)">
+        </div>
+      </div>
+
+      <div class="pal-popup-section">
+        <div class="pal-popup-label">로봇 스킨 프레셋</div>
+        <div class="pal-presets" id="skin-presets-container"></div>
+      </div>
+
+      <div class="pal-popup-section">
+        <div class="pal-popup-label">개별 컬러</div>
+        <div class="pal-popup-colors">
+          <div class="palette-item"><label>왼팔</label>
+            <input type="color" id="pal-arm-l" value="#3a7ae0" oninput="setArmColor('L',this.value)"></div>
+          <div class="palette-item"><label>오른팔</label>
+            <input type="color" id="pal-arm-r" value="#e04030" oninput="setArmColor('R',this.value)"></div>
+          <div class="palette-item"><label>몸통</label>
+            <input type="color" id="pal-body" value="#4a6080" oninput="setBodyColor(this.value)"></div>
+          <div class="palette-item"><label>손</label>
+            <input type="color" id="pal-hand" value="#7a8898" oninput="setHandColor(this.value)"></div>
+        </div>
+      </div>
+
+      <div class="pal-popup-divider"></div>
+      <button class="pal-reset-btn" onclick="resetDrumKit();togglePalette()" title="드럼 위치를 기본값으로 되돌립니다">
+        ↺ 드럼 위치 초기화
+      </button>
+    </div>
+
+    <div id="hud">
+      <div class="hud-chip">
+        L팔: <span id="joint-l">-</span><br>
+        R팔: <span id="joint-r">-</span>
+      </div>
+      <div class="hud-chip">상태: <span id="status-span" style="color:#6ef">대기 중</span></div>
+    </div>
+    <div id="rec-badge">● REC</div>
+    <div id="playbar">
+      <button class="pb-btn" id="btn-play"  onclick="playAnim()">▶</button>
+      <button class="pb-btn" id="btn-pause" onclick="pauseAnim()">⏸</button>
+      <button class="pb-btn" id="btn-stop"  onclick="stopAnim()">⏹</button>
+      <input type="range" id="scrubber" min="0" max="10" step="0.01" value="0">
+      <span id="time-lbl">0.00 / 0.0 s</span>
+      <button class="pb-btn on" id="btn-sound" onclick="toggleDrumSound()" title="드럼 사운드 켜기/끄기">🔊</button>
+      <button class="pb-btn on" id="btn-trail" onclick="toggleTCPTrail()"  title="TCP 경로 표시">🛤️</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══ 하단: 타임라인 (피아노 롤) ══ -->
+<div id="timeline-wrap">
+  <div id="tl-header">
+    <span id="tl-info">4마디 · 120BPM · 4/4박자</span>
+    <div id="tl-controls">
+      <label class="chk-intro-outro"><input type="checkbox" id="chk-intro" checked> 4초 인트로</label>
+      <label title="4초 인트로(neutral → 첫 타격 준비 자세)와 4초 아웃트로(탈출 경로)에 동일하게 적용됩니다 — 인트로/아웃트로 포함 여부는 각 체크박스로 별도 설정. 첫 타격 시작 위치·타이밍은 스타일과 무관하게 항상 동일">인트로 스타일:
+        <select id="intro-style-sel">
+          <option value="spread" selected>기본 (팔 벌림)</option>
+          <option value="retreat">후인 진입</option>
+          <option value="xstrike">X자 타격 (4회)</option>
+        </select>
+      </label>
+      <label class="chk-intro-outro"><input type="checkbox" id="chk-outro" checked> 4초 아웃트로</label>
+      <label><input type="checkbox" id="chk-snap" checked> 비트 스냅</label>
+      <label>분해능:
+        <select id="grid-sel">
+          <option value="4">1/4</option>
+          <option value="8" selected>1/8</option>
+          <option value="16">1/16</option>
+          <option value="32">1/32</option>
+        </select>
+      </label>
+      <label title="레인을 드래그하면 이 간격마다 반복해서 타격을 채웁니다(하나씩 클릭할 필요 없음)">드래그 간격:
+        <select id="drag-interval-sel">
+          <option value="0.25">1/4박</option>
+          <option value="0.5">1/2박</option>
+          <option value="1" selected>1박</option>
+          <option value="2">2박</option>
+          <option value="4">4박</option>
+        </select>
+      </label>
+      <div class="vel-mode-sel">
+        <span class="vel-mode-label">강도</span>
+        <button id="vel-mode-soft"   class="vel-mode-btn" onclick="setDefaultVel('soft')">약</button>
+        <button id="vel-mode-medium" class="vel-mode-btn active" onclick="setDefaultVel('medium')">중</button>
+        <button id="vel-mode-hard"   class="vel-mode-btn" onclick="setDefaultVel('hard')">강</button>
+      </div>
+      <button class="btn-sm" onclick="clearTimeline()">🗑 초기화</button>
+    </div>
+  </div>
+  <div id="timeline">
+    <div id="tl-lane-labels"></div>
+    <div id="tl-scroll">
+      <div id="tl-ruler-sec"></div>
+      <div id="tl-ruler"></div>
+      <div id="tl-lanes"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 검증 모달 ══ -->
+<div id="validation-modal" style="display:none">
+  <div id="validation-box">
+    <div class="modal-header">
+      ✓ 검증 결과
+      <button onclick="closeValidation()">✕</button>
+    </div>
+    <div id="validation-content"></div>
+  </div>
+</div>
+
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script src="js/intro_outro_presets.js?v=5"></script>
+<script type="module" src="js/app.js?v=5"></script>
+</body>
+</html>
