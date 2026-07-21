@@ -2301,10 +2301,14 @@ function retimeTooShortIntervals(tl, minInterval = 0.030) {
   for (let i = 1; i < tl.length; i++) {
     const prev = result[result.length - 1];
     const curr = tl[i];
-    const gap  = curr.time - prev.time;
-    result.push(gap > 0 && gap < minInterval
-      ? { ...curr, time: parseFloat((prev.time + minInterval).toFixed(4)) }
-      : { ...curr });
+    // 앞 점(보정이 이미 반영된 prev.time)과 minInterval보다 가까우면 그만큼 뒤로
+    // 민다. 반드시 "보정된 prev"와 비교해야 한다 — 예전엔 원본 gap만 보고
+    // gap>0 && gap<min일 때만 밀어서, 한 점을 앞으로 민 뒤 그 다음 원본 점이
+    // 밀린 점보다 앞서 있으면(gap<=0) 그대로 둬 time이 거꾸로 갔다. 그 결과
+    // 근접(거의 동시) 타격이 뭉친 구간에서 YAML의 time_from_start가 중간에
+    // 뒤섞여 추출되는 버그가 있었다. 이렇게 하면 항상 단조 증가한다.
+    const minTime = parseFloat((prev.time + minInterval).toFixed(4));
+    result.push(curr.time < minTime ? { ...curr, time: minTime } : { ...curr });
   }
   return result;
 }
