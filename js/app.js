@@ -2655,6 +2655,13 @@ window.stepPlayhead = function (dir, beatStep) {
   seekTo(pauseOffset + dir * step);
 };
 
+// 이 앱에서 오른쪽 클릭은 전부 자체 기능(비트 하나 삭제·드래그 지우개)으로
+// 쓰고 있어 브라우저 기본 우클릭 메뉴가 뜰 일이 없다 — 레인마다 개별로
+// preventDefault를 걸어도 드래그 종료 직후의 트레일링 contextmenu가 레인
+// 바깥(다른 엘리먼트)에서 뜨는 경우까지는 못 막아서, 아예 페이지 전체에서
+// 우클릭 메뉴 자체를 막는다.
+document.addEventListener('contextmenu', e => e.preventDefault());
+
 // 텍스트 입력·셀렉트에 포커스가 있을 때는 방향키를 가로채지 않는다(타이핑 방해 방지).
 // scrubber(input[type=range])에 포커스가 있으면 브라우저 기본 동작(자체 step)에 맡긴다.
 document.addEventListener('keydown', e => {
