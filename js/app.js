@@ -292,7 +292,27 @@ function loadTimeline() {
 // 끝나는 시점(mouseup)에 한 번만 몰아서 한다.
 let _tlDragActive = false;
 let _tlDragDirty  = false;
+
+// 재생 중 매 프레임 드럼 플래시·사운드를 트리거할 때, 이벤트마다 drumKit.find와
+// 문자열 키 생성을 반복하면 이벤트가 1000개 넘어갈 경우 프레임당 수만 번 호출돼
+// CPU·GC를 크게 잡아먹는다. 이벤트·키트가 바뀔 때만 한 번 미리 계산해 재사용한다.
+let _flashSchedule = [];
+let _flashDirty    = true;
+function _rebuildFlashSchedule() {
+  const byId = {};
+  drumKit.forEach(d => { byId[d.id] = d; });
+  _flashSchedule = timelineEvents.map(evt => {
+    const drum = byId[evt.drumId];
+    if (!drum) return null;
+    const ti = DRUM_TYPES[drum.type];
+    return { beat: evt.beat, rebDur: ti?.rebDur || 0.1,
+             key: `${evt.drumId}_${evt.beat}`, type: drum.type, drumId: evt.drumId };
+  }).filter(Boolean);
+  _flashDirty = false;
+}
+
 function _commitTimeline(newEvts) {
+  _flashDirty = true;
   if (_tlDragActive) {
     _tlDragDirty = true;
     if (newEvts) _tlAppendHits(newEvts);
@@ -1565,6 +1585,11 @@ const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// 그림자는 로봇 포즈가 바뀔 때만 다시 계산한다(정지 상태·카메라 궤도 회전만
+// 할 때 2048² 섀도맵을 매 프레임 다시 굽던 비용 제거). _shadowDirty가 켜진
+// 프레임에만 needsUpdate를 세운다.
+renderer.shadowMap.autoUpdate = false;
+let _shadowDirty = true;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
@@ -1667,25 +1692,31 @@ CHAIN.forEach(lk => {
 });
 
 // ── 순방향 기구학 (FK) ───────────────────────────────────────
+// 링크의 고정 회전(qO)·축 벡터(axisV)는 매 프레임 동일하므로 링크당 한 번만
+// 계산해 캐시한다(프레임마다 THREE 객체 수십 개를 새로 만들던 GC 부담 제거).
+const _fkScratchQ = new THREE.Quaternion();
 function updateFK(angles) {
   CHAIN.forEach(lk => {
     const g = groups[lk.name];
+    if (!lk._qO) {
+      lk._qO = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(lk.rpy[0], lk.rpy[1], lk.rpy[2], 'XYZ'));
+      lk._axisV = lk.axis ? new THREE.Vector3(...lk.axis).normalize() : null;
+    }
     const [x, y, z] = lk.xyz;
-    const [r, p, yw] = lk.rpy;
-    const qO = new THREE.Quaternion().setFromEuler(new THREE.Euler(r, p, yw, 'XYZ'));
     if (lk.type === 'revolute' && lk.joint && angles[lk.joint] !== undefined) {
-      const ax = new THREE.Vector3(...lk.axis).normalize();
-      g.quaternion.copy(qO).multiply(new THREE.Quaternion().setFromAxisAngle(ax, angles[lk.joint]));
+      g.quaternion.copy(lk._qO).multiply(_fkScratchQ.setFromAxisAngle(lk._axisV, angles[lk.joint]));
       g.position.set(x, y, z);
     } else if (lk.type === 'prismatic' && lk.joint) {
       const d = angles[lk.joint] || 0;
       g.position.set(x + lk.axis[0]*d, y + lk.axis[1]*d, z + lk.axis[2]*d);
-      g.quaternion.copy(qO);
+      g.quaternion.copy(lk._qO);
     } else {
-      g.position.set(x, y, z); g.quaternion.copy(qO);
+      g.position.set(x, y, z); g.quaternion.copy(lk._qO);
     }
   });
   updateJointHud(angles);
+  _shadowDirty = true;   // 포즈가 바뀌었으니 그림자 1회 갱신 필요
 }
 
 function updateJointHud(angles) {
@@ -2180,16 +2211,26 @@ function catmullRom(t, p0, p1, p2, p3) {
   );
 }
 
+// 재생 시 t는 대체로 단조 증가하므로, 직전에 찾은 구간 인덱스에서 이어서
+// 탐색한다(매번 0부터 선형 스캔하던 것을 제거 — 키프레임이 수천 개인 긴 곡에서
+// 프레임당 절반 스캔 비용을 없앰). seek로 t가 뒤로 점프하면 0부터 다시 찾는다.
+function _findSeg(kfs, t) {
+  const n = kfs.length;
+  let i = kfs._li | 0;
+  if (i < 0 || i > n - 2) i = 0;
+  if (kfs[i].time > t) i = 0;                    // t가 뒤로 점프 → 처음부터
+  while (i < n - 2 && kfs[i + 1].time < t) i++;  // t를 포함하는 구간까지 전진
+  kfs._li = i;
+  return i;
+}
+
 function interpolateArm(t, kfs, keys) {
   const neutral = {};
   keys.forEach(k => { neutral[k] = 0; });
   if (!kfs.length) return neutral;
   if (kfs.length === 1) { const o = {}; keys.forEach(k => { o[k] = kfs[0].angles[k] ?? 0; }); return o; }
 
-  let idx = kfs.length - 2;
-  for (let i = 0; i < kfs.length - 1; i++) {
-    if (kfs[i].time <= t && kfs[i+1].time >= t) { idx = i; break; }
-  }
+  const idx = _findSeg(kfs, t);
   const p1kf = kfs[idx], p2kf = kfs[idx + 1];
   if (p1kf.time === p2kf.time) { const o = {}; keys.forEach(k => { o[k] = p1kf.angles[k] ?? 0; }); return o; }
 
@@ -2546,10 +2587,7 @@ function interpolateAnglesFlat(t, flatKfs) {
   if (!flatKfs.length) return { ...NEUTRAL };
   if (flatKfs.length === 1) return { ...flatKfs[0].angles, L_grip: 0, R_grip: 0 };
 
-  let idx = flatKfs.length - 2;
-  for (let i = 0; i < flatKfs.length - 1; i++) {
-    if (flatKfs[i].time <= t && flatKfs[i + 1].time >= t) { idx = i; break; }
-  }
+  const idx = _findSeg(flatKfs, t);
   const p1kf = flatKfs[idx], p2kf = flatKfs[idx + 1];
   if (p1kf.time === p2kf.time) return { ...p1kf.angles, L_grip: 0, R_grip: 0 };
 
@@ -2606,6 +2644,12 @@ window.stopAnim = function () {
   _refVideoEl()?.pause();
   _syncRefVideo(0);
   clearTCPTrails();
+  // 정지 시점에 "타격 중"이던 드럼이 발광/확대된 채로 굳지 않게 상태를 리셋한다.
+  Object.keys(_flashState).forEach(k => { _flashState[k] = false; });
+  Object.values(drumMeshes).forEach(m => {
+    if (m) { m.material.emissiveIntensity = 0.22; m.scale.setScalar(1.0); }
+  });
+  document.querySelectorAll('.tl-hit.flash').forEach(h => h.classList.remove('flash'));
   document.getElementById('scrubber').value = 0;
   updateFK({ ...NEUTRAL });
   updateTimeLbl(0);
@@ -2755,28 +2799,29 @@ function animate() {
 
     const beatDur   = 60 / bpm;
     const introOff  = _getAudioTimeOffset(); // 인트로 ON → 4.0s, OFF → 0
-    timelineEvents.forEach(evt => {
-      const drum = drumKit.find(d => d.id === evt.drumId);
-      if (!drum) return;
-      const hitT    = (evt.beat - 1) * beatDur + introOff; // ← 인트로 오프셋 반영
-      const typeInfo = DRUM_TYPES[drum.type];
-      const inHit   = t >= hitT && t < hitT + (typeInfo?.rebDur || 0.1);
-      const key     = `${evt.drumId}_${evt.beat}`;
-      const mesh    = drumMeshes[evt.drumId];
-      if (!mesh) return;
+    if (_flashDirty) _rebuildFlashSchedule();
+    for (let i = 0; i < _flashSchedule.length; i++) {
+      const ev   = _flashSchedule[i];
+      const mesh = drumMeshes[ev.drumId];
+      if (!mesh) continue;
+      const hitT  = (ev.beat - 1) * beatDur + introOff; // ← 인트로 오프셋 반영
+      const inHit = t >= hitT && t < hitT + ev.rebDur;
+      const key   = ev.key;
+      // DOM 점은 data-beat(드럼+박자, 팔 무관)로 찾는다 — data-key엔 팔 접미사가
+      // 붙어 있어 팔 없이 만든 이 key와는 매칭되지 않는다(유니즌 양팔 점 모두 반영).
       if (inHit && !_flashState[key]) {
         _flashState[key] = true;
         mesh.material.emissiveIntensity = 1.8;
         mesh.scale.setScalar(1.25);
-        document.querySelectorAll(`.tl-hit[data-key="${key}"]`).forEach(h => h.classList.add('flash'));
-        playDrumSound(drum.type);   // ← 드럼 사운드 트리거
+        document.querySelectorAll(`.tl-hit[data-beat="${key}"]`).forEach(h => h.classList.add('flash'));
+        playDrumSound(ev.type);   // ← 드럼 사운드 트리거
       } else if (!inHit && _flashState[key]) {
         _flashState[key] = false;
         mesh.material.emissiveIntensity = 0.22;
         mesh.scale.setScalar(1.0);
-        document.querySelectorAll(`.tl-hit[data-key="${key}"]`).forEach(h => h.classList.remove('flash'));
+        document.querySelectorAll(`.tl-hit[data-beat="${key}"]`).forEach(h => h.classList.remove('flash'));
       }
-    });
+    }
   }
 
   // 미리보기 애니메이션 중엔 메인 루프 FK 업데이트 스킵 (덮어쓰기 방지)
@@ -2793,8 +2838,13 @@ function animate() {
     renderer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    _shadowDirty = true;   // 뷰포트 크기 변경 시 그림자 1회 갱신
   }
 
+  if (isPlaying || window._drumPreviewActive || _shadowDirty) {
+    renderer.shadowMap.needsUpdate = true;
+    _shadowDirty = false;
+  }
   renderer.render(scene, camera);
 }
 animate();
@@ -3188,7 +3238,42 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
   return hit;
 }
 
+// 그리드 선(마디·박자·세분음)은 모든 레인이 동일하고 편집(클릭 1번)마다
+// renderTimeline이 전체를 다시 그린다. 157마디×3박×세분음 = 레인당 ~900개,
+// 7레인이면 매 편집마다 div ~6000개를 createElement로 새로 만들어 편집이 크게
+// 밀렸다. 한 번만 만들어 두고(레이아웃이 바뀔 때만 재생성) 네이티브 cloneNode로
+// 복제한다 — 결과 DOM은 완전히 동일하고 생성 비용만 대폭 준다.
+let _gridTpl = null, _gridTplKey = '';
+function _laneGridFragment(div) {
+  const key = `${totalBars}|${beatsPerBar}|${div}|${PX_PER_BEAT.toFixed(3)}`;
+  if (!_gridTpl || _gridTplKey !== key) {
+    const frag = document.createDocumentFragment();
+    const subCount = div / 4;
+    for (let bar = 0; bar < totalBars; bar++) {
+      for (let beat = 0; beat < beatsPerBar; beat++) {
+        const bi = bar * beatsPerBar + beat;
+        const x  = bi * PX_PER_BEAT;
+        const line = document.createElement('div');
+        line.className  = 'tl-grid-line ' + (beat === 0 ? 'bar' : 'beat');
+        line.style.left = x + 'px';
+        frag.appendChild(line);
+        for (let sub = 1; sub < subCount; sub++) {
+          const sx = x + (sub / subCount) * PX_PER_BEAT;
+          const sl = document.createElement('div');
+          sl.className     = 'tl-grid-line';
+          sl.style.left    = sx + 'px';
+          sl.style.opacity = '0.35';
+          frag.appendChild(sl);
+        }
+      }
+    }
+    _gridTpl = frag; _gridTplKey = key;
+  }
+  return _gridTpl.cloneNode(true);
+}
+
 function renderTimeline() {
+  _flashDirty = true;   // 키트·타입·박자 변경도 플래시 스케줄 재계산 대상
   updatePxPerBeat();
   const totalBeats = totalBars * beatsPerBar;
   const totalW     = totalBeats * PX_PER_BEAT;
@@ -3267,26 +3352,7 @@ function renderTimeline() {
     lane.dataset.drumId  = drum.id;
     const typeInfo = DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
 
-    for (let bar = 0; bar < totalBars; bar++) {
-      for (let beat = 0; beat < beatsPerBar; beat++) {
-        const bi = bar * beatsPerBar + beat;
-        const x  = bi * PX_PER_BEAT;
-        const line = document.createElement('div');
-        line.className = 'tl-grid-line ' + (beat === 0 ? 'bar' : 'beat');
-        line.style.left = x + 'px';
-        lane.appendChild(line);
-
-        const subCount = div / 4;
-        for (let sub = 1; sub < subCount; sub++) {
-          const sx = x + (sub / subCount) * PX_PER_BEAT;
-          const sl = document.createElement('div');
-          sl.className = 'tl-grid-line';
-          sl.style.left    = sx + 'px';
-          sl.style.opacity = '0.35';
-          lane.appendChild(sl);
-        }
-      }
-    }
+    lane.appendChild(_laneGridFragment(div));
 
     timelineEvents.filter(e => e.drumId === drum.id).forEach(evt => {
       lane.appendChild(_createHitEl(drum, evt, splitArm, typeInfo));
@@ -3884,12 +3950,7 @@ function renderDrumList() {
     <button class="dvp-btn dvp-medium" onclick="previewDrumHit('${drum.id}','medium')" title="중 미리보기 (TCP 경로 표시)">중</button>
     <button class="dvp-btn dvp-hard"   onclick="previewDrumHit('${drum.id}','hard')"   title="강 미리보기 (TCP 경로 표시)">강</button>
   </div>
-  ${isKick
-    ? `<span class="drum-autogen-chk"></span>`
-    : `<label class="drum-autogen-chk" title="체크 해제 시 🎲 자동 생성에서 이 드럼을 사용하지 않음(실물 테스트로 일부 드럼만 연결했을 때 유용)">
-    <input type="checkbox" ${drum.autoGen === false ? '' : 'checked'}
-      onchange="updateDrumProp('${drum.id}','autoGen',this.checked)">
-  </label>`}
+  <span class="drum-autogen-chk"></span>
   <button class="drum-del-btn" onclick="deleteDrum('${drum.id}')" title="삭제">✕</button>
 </div>`;
   }).join('');
@@ -4035,7 +4096,13 @@ function updateTLInfo() {
 //  초기화
 // ═══════════════════════════════════════════════════════════════
 loadDrumKit();
-window.addEventListener('resize', () => renderTimeline());
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  // 리사이즈 드래그 중 연속 발생하는 이벤트마다 전체 레인을 재빌드하면 버벅이므로
+  // 마지막 이벤트로부터 150ms 뒤 한 번만 다시 그린다.
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => renderTimeline(), 150);
+});
 
 // 인트로/아웃트로 체크박스·인트로 스타일 변경 → 재생 타임라인 즉시 갱신
 ['chk-intro', 'chk-outro', 'intro-style-sel'].forEach(id => {
