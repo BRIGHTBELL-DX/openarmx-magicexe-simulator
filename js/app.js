@@ -308,14 +308,21 @@ function _commitTimeline(newEvts) {
 // 이미 있던 점이면(반대쪽 절반 드래그로 팔이 바뀐 경우) 지우고 다시 그려
 // arm-L/arm-R 스타일이 최신 상태를 반영하게 한다.
 function _tlAppendHits(evts) {
+  const seen = new Set();   // 같은 드럼+박자를 여러 번 처리하지 않도록(유니즌이면 evts에 2개 들어올 수 있음)
   evts.forEach(evt => {
-    const key = `${evt.drumId}_${evt.beat}`;
+    const beatKey = `${evt.drumId}_${evt.beat}`;
+    if (seen.has(beatKey)) return;
+    seen.add(beatKey);
     const lane = document.querySelector(`.tl-lane[data-drum-id="${evt.drumId}"]`);
     const drum = drumKit.find(d => d.id === evt.drumId);
     if (!lane || !drum) return;
-    const old = lane.querySelector(`.tl-hit[data-key="${key}"]`);
-    if (old) old.remove();
-    lane.appendChild(_createHitEl(drum, evt, drum.type !== 'kick'));
+    // 이 드럼+박자에 있던 점을 전부 지우고 현재 timelineEvents 기준으로
+    // 다시 그린다 — evt.arm이 setEventArm으로 이미 바뀐 뒤라 evt 자체에서
+    // "이전 팔" 키를 알 수 없으므로, 팔 없이(drumId+beat만) 찾아 지운다.
+    lane.querySelectorAll(`.tl-hit[data-beat="${beatKey}"]`).forEach(el => el.remove());
+    timelineEvents
+      .filter(e => e.drumId === evt.drumId && Math.abs(e.beat - evt.beat) < 0.01)
+      .forEach(e => lane.appendChild(_createHitEl(drum, e, drum.type !== 'kick')));
   });
 }
 
@@ -2466,20 +2473,22 @@ function buildTimelineWithIntroOutro(options = {}) {
     // frontReadyPose로 대기 — 늦게 들어오는 팔까지 인트로 끝(4.00s)에
     // "이미 친 것처럼" 강제하면 타임라인에 없는 타격이 나오고, 그 직후
     // 본편 트랙과 이어지며 불연속 점프+장시간 스플라인 드리프트까지
-    // 겹치는 문제가 있었음 — 곡 전체 최초 박과 같은 팔만 안무에 반영한다.
-    // 대기 폴백은 frontReadyPose가 아니라 preLift여야 함 — buildKeyframes()의
-    // 각 팔 시작 포즈(J4를 살짝 든 preLift)와 정확히 같은 값을 써야, 인트로
-    // 끝에서 본편 트랙으로 넘어갈 때 J4가 순간적으로 어긋나며 튀지 않는다.)
+    // 겹치는 문제가 있었음.
+    //
+    // 예전엔 "다른 팔의 첫 박보다 늦지만 않으면" 안무에 반영했는데, 그러면
+    // 두 팔의 첫 박이 서로 같더라도 1박(=인트로 끝 t=4.00s와 정확히 맞아
+    // 떨어지는 지점)이 아니면 여전히 틀렸다 — 인트로는 항상 정확히 beat=1을
+    // 겨냥해 끝나므로, 실제 첫 박이 1박이 아닌 경우(곡 시작에 쉼표가 있는
+    // 경우) 거기서 강제로 미리 친 뒤 다시 원위치로 돌아가 실제 박을 기다리는
+    // "유령 타격"이 그대로 재현됐다(사용자 실측 확인: 타임라인엔 없는데
+    // 인트로 직후 하이햇·스네어가 한 번 치고 올라갔다 다시 시작). 이제는
+    // 오직 그 팔의 첫 박이 정확히 1박일 때만 안무에 반영한다.
     const { L: READY_L, R: READY_R } = _getPreLiftPoses();
     let hitL = _firstArmHit('L');
     let hitR = _firstArmHit('R');
-    const firstBeats = [hitL, hitR].filter(Boolean).map(h => h.beat);
-    if (firstBeats.length) {
-      const globalFirstBeat = Math.min(...firstBeats);
-      const BEAT_EPS = 0.001;
-      if (hitL && hitL.beat > globalFirstBeat + BEAT_EPS) hitL = null;
-      if (hitR && hitR.beat > globalFirstBeat + BEAT_EPS) hitR = null;
-    }
+    const BEAT_EPS = 0.001;
+    if (hitL && hitL.beat > 1 + BEAT_EPS) hitL = null;
+    if (hitR && hitR.beat > 1 + BEAT_EPS) hitR = null;
     const raiseL  = hitL ? computeStrikePose(hitL.drum, 'raise',  hitL.vel) : null;
     const strikeL = hitL ? computeStrikePose(hitL.drum, 'strike', hitL.vel) : null;
     const raiseR  = hitR ? computeStrikePose(hitR.drum, 'raise',  hitR.vel) : null;
@@ -3162,21 +3171,26 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
   const hit = document.createElement('div');
   hit.className      = `tl-hit vel-${vel} ${armCls}`;
   hit.dataset.vel    = vel;
-  hit.dataset.key    = `${drum.id}_${evt.beat}`;
+  // key는 팔까지 포함 — 같은 드럼·같은 박자를 왼팔·오른팔이 동시에 칠 때
+  // (유니즌 액센트) 두 이벤트가 별개 DOM 요소로 구분되게 한다. beat(팔 없이
+  // 드럼+박자만)는 "이 드럼의 이 박자에 있는 점을 전부 지우고 다시 그린다"류
+  // 갱신(_tlAppendHits)에서 쓴다.
+  hit.dataset.key    = `${drum.id}_${evt.beat}_${effArm}`;
+  hit.dataset.beat   = `${drum.id}_${evt.beat}`;
   hit.style.left     = x + 'px';
   hit.style.background  = typeInfo.color;
   hit.style.boxShadow   = VEL_GLOW[vel](typeInfo.color);
   const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
   const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
   hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
-  hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat); });
+  hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat, effArm); });
   hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(e.clientX, e.clientY, drum.id, evt.beat, effArm); });
   hit.addEventListener('contextmenu', e => {
     e.preventDefault(); e.stopPropagation();
     // 오른쪽 드래그 지우개가 방금 끝난 직후의 트레일링 contextmenu가 남아있는
     // 점 위에 떨어지면, 의도치 않게 그 점까지 하나 더 지워버리는 걸 방지.
     if (performance.now() < _tlDragSuppressClickUntil) return;
-    removeEvent(drum.id, evt.beat);
+    removeEvent(drum.id, evt.beat, effArm);
   });
   return hit;
 }
@@ -3356,24 +3370,31 @@ function _effArm(evt) {
 
 // arm을 명시하면(레인의 클릭된 절반) 그 팔로 배치, 생략하면 드럼 기본 팔 사용.
 function addEvent(drumId, beat, arm) {
-  // ── 토글: 같은 드럼 같은 박자 → 제거
-  const sameIdx = timelineEvents.findIndex(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
-  if (sameIdx >= 0) {
-    timelineEvents.splice(sameIdx, 1);
-    _commitTimeline();
-    return;
-  }
-
   const drum = drumKit.find(d => d.id === drumId);
 
-  // 킥은 팔 충돌 없음
+  // 킥은 팔 충돌 없음 — 토글도 드럼+박자만으로 충분(팔 개념 자체가 없음)
   if (!drum || drum.type === 'kick') {
+    const sameIdx = timelineEvents.findIndex(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
+    if (sameIdx >= 0) { timelineEvents.splice(sameIdx, 1); _commitTimeline(); return; }
     timelineEvents.push({ drumId, beat, vel: defaultVel });
     _commitTimeline();
     return;
   }
 
   const useArm = (arm === 'L' || arm === 'R') ? arm : drum.arm;
+
+  // ── 토글: 같은 드럼·같은 박자·같은 팔 → 제거. 팔이 다르면(예: 같은 드럼을
+  // 왼팔은 이미 치고 있고 오른쪽 절반을 클릭) 토글하지 않고 아래로 내려가
+  // 새 이벤트로 추가한다 — 왼팔·오른팔이 같은 드럼을 동시에 치는 유니즌
+  // 액센트(예: 스네어 양손 강타)를 표현할 수 있어야 하는데, 예전엔 드럼+
+  // 박자만으로 "이미 있음"을 판단해 팔이 달라도 무조건 토글(삭제)해버렸다.
+  const sameArmIdx = timelineEvents.findIndex(e =>
+    e.drumId === drumId && Math.abs(e.beat - beat) < 0.01 && _effArm(e) === useArm);
+  if (sameArmIdx >= 0) {
+    timelineEvents.splice(sameArmIdx, 1);
+    _commitTimeline();
+    return;
+  }
 
   // ── 규칙 1: 동일 팔이 같은 박자에 이미 있으면 배치 불가 (팔 오버라이드 반영)
   const sameArmConflict = timelineEvents.find(e => {
@@ -3413,9 +3434,12 @@ function addEvent(drumId, beat, arm) {
 }
 
 // 이미 배치된 비트의 타격 팔을 바꾼다 — 같은 박자에 대상 팔이 이미 쓰이고
-// 있으면 거부(규칙 1·2와 동일한 제약을 그대로 적용).
-function setEventArm(drumId, beat, newArm) {
-  const evt = timelineEvents.find(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
+// 있으면 거부(규칙 1·2와 동일한 제약을 그대로 적용). oldArm으로 정확히 어느
+// 이벤트를 바꿀지 지정한다 — 이제 같은 드럼·같은 박자에 왼팔·오른팔 이벤트가
+// 동시에 있을 수 있어서, drumId+beat만으로는 어느 쪽을 바꾸려는 건지 모호하다.
+function setEventArm(drumId, beat, oldArm, newArm) {
+  const evt = timelineEvents.find(e =>
+    e.drumId === drumId && Math.abs(e.beat - beat) < 0.01 && _effArm(e) === oldArm);
   if (!evt) return;
   const drum = drumKit.find(d => d.id === drumId);
   if (!drum || drum.type === 'kick') return;
@@ -3469,29 +3493,35 @@ function _showArmDropdown(clientX, clientY, drumId, beat, currentArm) {
 
   sel.focus();
   const close = () => sel.remove();
-  sel.addEventListener('change', () => { setEventArm(drumId, beat, sel.value); close(); });
+  sel.addEventListener('change', () => { setEventArm(drumId, beat, currentArm, sel.value); close(); });
   sel.addEventListener('blur', close);
   sel.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
 }
 
-function removeEvent(drumId, beat) {
-  const idx = timelineEvents.findIndex(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
+// arm을 주면 그 팔의 이벤트만 정확히 지운다(같은 드럼·박자에 왼팔·오른팔
+// 이벤트가 동시에 있을 수 있으므로) — 생략하면 예전처럼 첫 매치를 지운다.
+function removeEvent(drumId, beat, arm) {
+  const idx = timelineEvents.findIndex(e =>
+    e.drumId === drumId && Math.abs(e.beat - beat) < 0.01 && (arm == null || _effArm(e) === arm));
   if (idx >= 0) {
     timelineEvents.splice(idx, 1);
     _commitTimeline();
   }
 }
 
-// 이미 있으면 새로 추가하지 않음 — addEvent는 같은 자리를 다시 누르면 토글
-// (삭제)하므로, 드래그로 같은 위치를 여러 번 지나가도 지워지지 않게 분리.
-// 단, 이미 있는 비트를 "반대쪽 절반"으로 다시 드래그하면(왼팔 구간 드래그
-// 후 같은 자리를 오른팔 구간으로 다시 드래그하는 등) 팔을 그 자리에서
-// 바꿔준다 — 그래야 왼팔 드래그·오른팔 드래그를 교차시켜 번갈아 치는
-// 패턴을 만들 수 있다(그전엔 이미 채워진 자리는 무조건 무시돼 불가능했음).
+// 이미 이 팔로 채워져 있으면 손대지 않음(드래그로 같은 위치를 여러 번
+// 지나가도 지워지지 않게). 반대팔 이벤트가 이미 있으면 — 클릭과 달리 여기선
+// 유니즌으로 "추가"하지 않고 그 이벤트를 이 팔로 "재지정"한다 — 왼팔
+// 드래그·오른팔 드래그를 교차시켜 번갈아 치는 패턴(엇박 등)을 만드는 기존
+// 용도를 그대로 유지하기 위함. 왼팔·오른팔이 같은 드럼을 동시에 치는
+// 유니즌 액센트는 (의도적인 조작이라) 개별 클릭(addEvent)으로만 만든다.
 function addEventIfMissing(drumId, beat, arm) {
-  const existing = timelineEvents.find(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
-  if (!existing) { addEvent(drumId, beat, arm); return; }
-  if ((arm === 'L' || arm === 'R') && _effArm(existing) !== arm) setEventArm(drumId, beat, arm);
+  const sameArm = timelineEvents.find(e =>
+    e.drumId === drumId && Math.abs(e.beat - beat) < 0.01 && _effArm(e) === arm);
+  if (sameArm) return;
+  const otherArm = timelineEvents.find(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
+  if (otherArm && (arm === 'L' || arm === 'R')) { setEventArm(drumId, beat, _effArm(otherArm), arm); return; }
+  addEvent(drumId, beat, arm);
 }
 
 // ── 타임라인 레인 드래그 → 지정 간격마다 반복 채우기 ─────────────────
@@ -3590,7 +3620,7 @@ document.addEventListener('mousemove', e => {
   if (!toRemove.length) return;
   _tlEraseOccurred = true;
   toRemove.forEach(evt => {
-    document.querySelector(`.tl-lane[data-drum-id="${evt.drumId}"] .tl-hit[data-key="${evt.drumId}_${evt.beat}"]`)?.remove();
+    document.querySelector(`.tl-lane[data-drum-id="${evt.drumId}"] .tl-hit[data-key="${evt.drumId}_${evt.beat}_${_effArm(evt)}"]`)?.remove();
   });
   const removeSet = new Set(toRemove);
   timelineEvents = timelineEvents.filter(ev => !removeSet.has(ev));
@@ -3609,8 +3639,11 @@ document.addEventListener('mouseup', () => {
 });
 
 // 노트 클릭 시 현재 선택된 defaultVel로 즉시 적용
-function applyVel(drumId, beat) {
-  const evt = timelineEvents.find(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
+// arm을 주면(같은 드럼·박자에 유니즌으로 왼팔·오른팔 이벤트가 동시에 있을
+// 수 있으므로) 그 팔의 이벤트만 정확히 찾는다.
+function applyVel(drumId, beat, arm) {
+  const evt = timelineEvents.find(e =>
+    e.drumId === drumId && Math.abs(e.beat - beat) < 0.01 && (arm == null || _effArm(e) === arm));
   if (!evt) return;
   evt.vel = defaultVel;
   _commitTimeline();
