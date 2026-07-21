@@ -37,33 +37,27 @@ const VEL_GLOW = {
 // ═══════════════════════════════════════════════════════════════
 //  드럼 키트 상태
 // ═══════════════════════════════════════════════════════════════
-// 어깨(암 루트) 높이 0.698m 기준 — 실제 8피스 드럼 키트 배치 (드럼채 대응)
-// 아래 좌표는 사용자가 로컬에서 최종 확정한 값 — J1(후인 금지)·J2(고정)·
-// J5(안쪽 말림 금지) 제한(아래 _IK_LIMITS 참고) 하에서 실측 검증 결과
-// 7드럼 전부 팁 오차 7mm 이내·수직성 0.93+·호 직진성 전부 양수(0.36~0.73)로
-// 이번 세션 중 가장 고르게 좋은 결과였다.
-// 스네어·플로어 탐은 X를 +0.06m 추가 조정(0.59→0.65) — 원래 위치에서도
-// 도달은 됐지만 J3·J6이 크게(스네어 J3=-0.43·J6=-0.94, 플로어 탐
-// J3=+0.45·J6=+0.93) 꺾여야 했다. X를 늘리자 두 관절 다 거의 0으로
-// 완화되면서 직진성도 오히려 소폭 개선됐다(실측 검증).
+// 어깨(암 루트) 높이 0.698m 기준 — 실제 7피스 드럼 키트 배치 (드럼채 대응).
+// 아래 좌표·팔 배정은 사용자가 확정한 현장 세팅 값(킥 미사용). 드럼 id는
+// 템플릿(프리셋)이 참조하므로 유지한다 — 킥이 쓰던 d4는 비우고 나머지는
+// 기존 id 그대로 둔다.
 let drumKit = [
   // ─ L팔 ─────────────────────────────────────────────────────────
-  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.68, y: 0.14,  z:0.25} },
-  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.77, y: 0.31,  z:0.50} },
-  { id:'d2', name:'스네어',      type:'snare', arm:'L', pos:{x:0.65, y: 0.14,  z:0.28} },
-  { id:'d3', name:'스몰 탐',     type:'tom_h', arm:'L', pos:{x:0.76, y: 0.11,  z:0.50} },
-  // ─ 킥 (표시 전용, 팔 미사용) ─────────────────────────────────
-  { id:'d4', name:'킥',          type:'kick',  arm:'kick', pos:{x:0.63, y: 0.00, z:0.12} },
+  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.62, y: 0.41,  z:0.25} },
+  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.78, y: 0.27,  z:0.35} },
+  { id:'d2', name:'스네어',      type:'snare', arm:'L', pos:{x:0.59, y: 0.00,  z:0.20} },
+  { id:'d3', name:'스몰 탐',     type:'tom_h', arm:'L', pos:{x:0.80, y: 0.10,  z:0.35} },
   // ─ R팔 ─────────────────────────────────────────────────────────
-  { id:'d5', name:'미들 탐',     type:'tom_m', arm:'R', pos:{x:0.77, y:-0.13,  z:0.50} },
-  { id:'d6', name:'플로어 탐',   type:'tom_f', arm:'R', pos:{x:0.65, y:-0.16,  z:0.26} },
-  { id:'d7', name:'라이드 심벌', type:'ride',  arm:'R', pos:{x:0.72, y:-0.40,  z:0.50} },
+  { id:'d5', name:'미들 탐',     type:'tom_m', arm:'R', pos:{x:0.80, y:-0.10,  z:0.35} },
+  { id:'d6', name:'플로어 탐',   type:'tom_f', arm:'R', pos:{x:0.56, y:-0.44,  z:0.20} },
+  { id:'d7', name:'라이드 심벌', type:'ride',  arm:'R', pos:{x:0.72, y:-0.33,  z:0.35} },
 ];
-let nextDrumId = 8;
+// id는 비연속(d4 없음)일 수 있으므로 개수가 아니라 최대 id+1로 다음 id를 잡는다.
+let nextDrumId = Math.max(8, ...drumKit.map(d => parseInt(d.id.replace(/\D/g, '')) + 1));
 
 // 기본값 스냅샷 (초기화 버튼용)
 const DEFAULT_DRUM_KIT = drumKit.map(d => ({...d, pos: {...d.pos}}));
-const _DK_STORE = 'openarmx_drum_kit_v17';
+const _DK_STORE = 'openarmx_drum_kit_v18';
 
 function saveDrumKit() {
   try { localStorage.setItem(_DK_STORE, JSON.stringify(drumKit)); } catch(e) {}
@@ -90,7 +84,9 @@ window.resetDrumKit = function () {
     return;
   }
   drumKit = DEFAULT_DRUM_KIT.map(d => ({...d, pos: {...d.pos}}));
-  nextDrumId = DEFAULT_DRUM_KIT.length;
+  // id가 d4 없이 비연속(d0~d3, d5~d7)이라 배열 길이(7)를 그대로 쓰면
+  // 다음 새 드럼이 이미 존재하는 d7과 충돌한다 — 실제 최대 id+1로 잡는다.
+  nextDrumId = Math.max(8, ...drumKit.map(d => parseInt(d.id.replace(/\D/g, '')) + 1));
   saveDrumKit();
   rebuildDrumSpheres(); renderDrumList(); renderTimeline();
   _playKFs = buildFinalKeyframes(); _playDur = _playKFs.totalTime;
