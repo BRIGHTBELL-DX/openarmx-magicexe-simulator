@@ -883,19 +883,6 @@ function _getReadyPoses() {
   };
 }
 
-/** frontReadyPose + J4(팔꿈치) +0.58(최대 1.70) — 타격 대기 중 팔이 즉시
- *  내려오지 않도록 살짝 들어 올린 자세. buildKeyframes()의 각 팔 시작
- *  포즈와 정확히 같은 값이어야, 인트로 끝(firstRaisePose 폴백)에서 본편
- *  트랙으로 넘어갈 때 팔이 툭 튀지 않는다(둘이 다르면 J4가 순간적으로
- *  어긋나며 스냅되는 문제가 있었음). */
-function _getPreLiftPoses() {
-  const { L: READY_L, R: READY_R } = _getReadyPoses();
-  const lift = (ready) => Object.fromEntries(
-    Object.entries(ready).map(([k, v]) => [k, k.endsWith('4') ? clamp(v + 0.58, 0.10, 1.70) : v])
-  );
-  return { L: lift(READY_L), R: lift(READY_R) };
-}
-
 const _SIDE_KEYS = { L: ['L1','L2','L3','L4','L5','L6','L7'], R: ['R1','R2','R3','R4','R5','R6','R7'] };
 function _sidePick(pose, side) {
   const out = {};
@@ -928,10 +915,12 @@ function buildKeyframes() {
 
   const { L: READY_L, R: READY_R } = _getReadyPoses();
 
-  // preLift: READY + J4 +0.58 (최대 1.70) — 인트로 preLift와 동일 높이
-  // → 인트로 t=4.00 이후 이벤트가 없는 팔이 즉시 내려오지 않도록
-  const { L: preLiftL, R: preLiftR } = _getPreLiftPoses();
-  const preLift = { L: preLiftL, R: preLiftR };
+  // 대기(휴식) 자세 — 예전엔 여기서 preLift(READY + J4 +0.58, 최대 1.70까지
+  // 팔꿈치를 더 들어올린 자세)를 썼는데, 그러면 타격이 한동안 없는 구간(곡
+  // 시작부 대기·긴 공백)에서 팔꿈치가 거의 한계까지 굽어 있어 몸통(바디)에
+  // 부딪히고 움직임 폭도 커 보인다는 피드백 — 인트로가 끝난 자세(frontReady,
+  // READY_L/READY_R)를 그대로 대기 자세로 쓴다.
+  const preLift = { L: READY_L, R: READY_R };
 
   // 첫 타격 전 대기 시간이 길면 대기 자세를 계속 유지하다가, 타격 사이
   // 회수와 같은 자연스러운 속도(preDur)로만 드럼 쪽으로 움직이기 시작
@@ -947,9 +936,9 @@ function buildKeyframes() {
   const L_poseMap = new Map();
   const R_poseMap = new Map();
 
-  // 시작 포즈를 preLift 레벨로 설정 (인트로 종료 포즈와 연속성 유지)
-  L_poseMap.set('0.000', { ...preLiftL });
-  R_poseMap.set('0.000', { ...preLiftR });
+  // 시작 포즈를 대기 자세로 설정 (인트로 종료 포즈와 연속성 유지)
+  L_poseMap.set('0.000', { ...preLift.L });
+  R_poseMap.set('0.000', { ...preLift.R });
 
   // 팔별 이벤트를 시간순 정렬 — rebound/raise 겹침 감지에 필요
   // evt.arm이 있으면(팔 오버라이드) 드럼의 원래 팔 대신 그 팔로 그룹핑한다.
@@ -2483,7 +2472,11 @@ function buildTimelineWithIntroOutro(options = {}) {
     // "유령 타격"이 그대로 재현됐다(사용자 실측 확인: 타임라인엔 없는데
     // 인트로 직후 하이햇·스네어가 한 번 치고 올라갔다 다시 시작). 이제는
     // 오직 그 팔의 첫 박이 정확히 1박일 때만 안무에 반영한다.
-    const { L: READY_L, R: READY_R } = _getPreLiftPoses();
+    // 대기 폴백은 buildKeyframes()의 대기 자세와 같은 frontReadyPose를 쓴다
+    // (예전엔 팔꿈치를 더 든 preLift를 썼는데, 첫 박이 늦게 등장하는 팔이
+    // 그 동안 팔꿈치를 거의 한계까지 굽힌 채 대기해 몸통에 부딪히고 움직임도
+    // 커 보인다는 피드백으로 변경 — 인트로 자체가 끝나는 자세와 동일해짐).
+    const { L: READY_L, R: READY_R } = _getReadyPoses();
     let hitL = _firstArmHit('L');
     let hitR = _firstArmHit('R');
     const BEAT_EPS = 0.001;
@@ -3570,18 +3563,17 @@ document.addEventListener('mousemove', e => {
   const totalBeats = totalBars * beatsPerBar;
   const lo = Math.min(startBeat, curBeat);
   const hi = Math.max(startBeat, curBeat);
-  // 간격 그리드의 기준점 — 드래그를 시작한 위치를 "비트 1 기준 전역 간격
-  // 그리드"(1, 1+interval, 2+interval, ...)에 먼저 스냅한 뒤, "엇박" 체크박스가
-  // 켜져 있으면 반 칸(interval/2)을 더한다. 예전엔 항상 정확히 1 기준이라,
-  // 이미 다른 팔로 채워진 자리 "사이"(예: 1.5박)에서 드래그를 시작해도 그
-  // 시작점이 그리드에 없어 짧게 드래그하면 아무것도 안 채워지는 문제가
-  // 있었다(스냅으로 해결). 엇박 체크박스는 오른팔을 정박(1,2,3..)으로 채운
-  // 뒤 왼팔을 "같은 간격"으로 다시 드래그해도 정박을 덮어쓰지 않고 엇박
-  // (1.5, 2.5, ...)에만 채워 교차 패턴을 쉽게 만들 수 있게 해준다 — 마우스로
-  // 정확히 반 칸 위치를 클릭할 필요가 없다.
+  // 간격 그리드의 기준점 — 드래그를 "시작한 바로 그 위치"(startBeat, 이미
+  // beatFromEvent의 1/8 스냅이 적용된 값)를 그대로 기준으로 삼는다. 한때
+  // 이걸 "비트 1 기준 전역 그리드"에 반올림해서 스냅한 적이 있었는데, 그러면
+  // 정작 사용자가 정확히 찍은 시작 위치가 아니라 그 근처의 다른 박(반박
+  // 어긋난 자리)부터 채워지는 버그가 있었다 — 항상 "내가 처음 클릭한 지점"
+  // 이 첫 비트가 되도록 반올림 없이 그대로 쓴다. "엇박" 체크박스는 여기서
+  // 반 칸(interval/2)을 더해, 오른팔을 정박으로 채운 뒤 왼팔을 "같은 간격"
+  // 으로 다시 드래그하면 정박을 덮어쓰지 않고 엇박에만 채워 교차 패턴을
+  // 쉽게 만들 수 있게 해준다.
   const offbeat    = document.getElementById('chk-drag-offbeat')?.checked;
-  const gridAnchor = Math.round((startBeat - 1) / interval) * interval + 1
-                     + (offbeat ? interval / 2 : 0);
+  const gridAnchor = startBeat + (offbeat ? interval / 2 : 0);
   const firstK = Math.ceil((lo - gridAnchor) / interval);
   const lastK  = Math.floor((hi - gridAnchor) / interval);
   const addedEvts = [];
