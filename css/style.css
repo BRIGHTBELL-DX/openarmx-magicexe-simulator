@@ -232,7 +232,7 @@ body {
    전부 배치한다(예전엔 2열 카드로 쌓아서 세로 공간이 많이 필요했음). */
 .drum-row {
   display: grid;
-  grid-template-columns: 8px minmax(46px,1fr) 60px 30px 58px 58px 58px 60px 16px 16px;
+  grid-template-columns: 8px minmax(46px,1fr) 60px 30px 32px 58px 58px 58px 60px 16px 16px;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
@@ -275,6 +275,14 @@ body {
   cursor: pointer;
 }
 .drum-autogen-chk input { cursor: pointer; margin: 0; }
+/* 이 위치에서 왼팔/오른팔이 실제로 자연스럽게 닿는지(IK 수렴 기준) 즉시 표시 */
+.drum-reach-badge { display: flex; gap: 2px; justify-content: center; }
+.drum-reach-badge .reach-l, .drum-reach-badge .reach-r {
+  font-size: 8px; font-weight: 700; width: 14px; height: 14px; line-height: 14px;
+  text-align: center; border-radius: 3px;
+}
+.drum-reach-badge .ok  { background: #3ecf6e; color: #0b0b14; }
+.drum-reach-badge .bad { background: #e04040; color: #fff; }
 .drum-type-sel, .drum-arm-sel {
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -503,6 +511,7 @@ body {
   border-bottom: 1px solid #111128;
   overflow: hidden;
   flex-shrink: 0;
+  cursor: pointer;   /* 클릭하면 그 위치로 재생 이동 */
 }
 .ruler-sec {
   position: absolute;
@@ -514,7 +523,17 @@ body {
   font-family: monospace;
   white-space: nowrap;
 }
-.ruler-sec-bar { color: #66aadd; font-weight: 700; }
+/* 마디 시작(1박 정박) 초 표시 — 일반 박자와 색이 비슷해 구분이 잘 안 된다는
+   피드백으로, 아예 눈에 띄는 색 배경 칩으로 바꿔 한눈에 "여기가 1박"임을
+   알 수 있게 한다. */
+.ruler-sec-bar {
+  color: #1a1a2a;
+  background: #ffcc44;
+  font-weight: 800;
+  padding: 0 3px;
+  border-radius: 2px;
+  bottom: 1px;
+}
 
 /* 마디·박자 루러 행 */
 #tl-ruler {
@@ -524,6 +543,7 @@ body {
   border-bottom: 1px solid var(--border);
   overflow: hidden;
   flex-shrink: 0;
+  cursor: pointer;   /* 클릭하면 그 위치로 재생 이동 */
 }
 .ruler-mark {
   position: absolute;
@@ -548,7 +568,7 @@ body {
   cursor: crosshair;
   user-select: none;
 }
-.tl-lane:hover { background: rgba(50,70,130,0.08); }
+.tl-lane:hover { background-color: rgba(50,70,130,0.08); }
 /* 팔(L/R) 구분 레인 — 위 절반=왼팔, 아래 절반=오른팔. 킥처럼 팔 구분이
    없는 레인(.split 없음)은 구분선 없이 기존처럼 통짜로 쓴다. */
 .tl-lane.split::after {
@@ -559,6 +579,28 @@ body {
   height: 1px;
   background: rgba(255,255,255,0.07);
   pointer-events: none;
+}
+/* 현재 드럼 위치 기준 해당 절반(팔)이 자연스럽게 닿지 않으면 붉게 음영
+   — 드래그로 비트 찍기 전에 시각적으로 바로 알 수 있게 한다. */
+.tl-lane.split.half-l-unreachable {
+  background-image: repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px);
+  background-size: 100% 50%;
+  background-position: top left;
+  background-repeat: no-repeat;
+}
+.tl-lane.split.half-r-unreachable {
+  background-image: repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px);
+  background-size: 100% 50%;
+  background-position: bottom left;
+  background-repeat: no-repeat;
+}
+.tl-lane.split.half-l-unreachable.half-r-unreachable {
+  background-image:
+    repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px),
+    repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px);
+  background-size: 100% 50%, 100% 50%;
+  background-position: top left, bottom left;
+  background-repeat: no-repeat, no-repeat;
 }
 .tl-grid-line {
   position: absolute;

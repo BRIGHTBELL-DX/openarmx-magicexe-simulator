@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenArmX MAGIC.EXE 드럼 타임라인</title>
-<link rel="stylesheet" href="css/style.css?v=3">
+<link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
 
@@ -152,8 +152,16 @@
       <button class="pb-btn" id="btn-play"  onclick="playAnim()">▶</button>
       <button class="pb-btn" id="btn-pause" onclick="pauseAnim()">⏸</button>
       <button class="pb-btn" id="btn-stop"  onclick="stopAnim()">⏹</button>
+      <button class="pb-btn" onclick="stepPlayhead(-1,false)" title="1프레임 뒤로 (←)">◀</button>
+      <button class="pb-btn" onclick="stepPlayhead(1,false)" title="1프레임 앞으로 (→)">▶|</button>
       <input type="range" id="scrubber" min="0" max="10" step="0.01" value="0">
       <span id="time-lbl">0.00 / 0.0 s</span>
+      <select id="speed-sel" title="재생 속도 — 영상과 비교하며 세밀하게 볼 때 느리게" onchange="setPlaybackSpeed(this.value)">
+        <option value="0.25">0.25배</option>
+        <option value="0.5">0.5배</option>
+        <option value="1" selected>1배</option>
+        <option value="1.5">1.5배</option>
+      </select>
       <button class="pb-btn on" id="btn-sound" onclick="toggleDrumSound()" title="드럼 사운드 켜기/끄기">🔊</button>
       <button class="pb-btn on" id="btn-trail" onclick="toggleTCPTrail()"  title="TCP 경로 표시">🛤️</button>
     </div>
@@ -169,12 +177,18 @@
       <input type="file" id="ref-video-file" accept="video/*" style="display:none" onchange="loadRefVideo(this)">
     </label>
     <span id="ref-video-name">파일 없음</span>
+    <button class="btn-sm" onclick="clearRefVideo()" title="업로드한 참고 영상 제거(새로고침해도 되살아나지 않음)">✕ 제거</button>
     <video id="ref-video-el" playsinline></video>
     <div class="pal-popup-section">
       <div class="pal-popup-label" title="영상에서 음악이 실제로 시작하는 지점(초) — 재생 위치 t=0일 때 영상이 이 시점부터 재생되도록 맞춥니다">영상 오프셋(초)</div>
       <div class="stroke-ctrl">
         <input id="ref-video-offset" type="number" step="0.1" value="0" oninput="setRefVideoOffset(this.value)">
         <button class="btn-sm" onclick="toggleRefVideoMute()" id="ref-video-mute-btn" title="영상 자체 소리 켜기/끄기">🔊</button>
+      </div>
+      <div class="pal-popup-label" title="영상 자체 소리 크기 — 100%를 넘기면 원본보다 증폭됩니다">영상 음량</div>
+      <div class="stroke-ctrl">
+        <input id="ref-video-volume" type="range" min="0" max="2.5" step="0.05" value="1" oninput="setRefVideoVolume(this.value)">
+        <span id="ref-video-volume-val">100%</span>
       </div>
     </div>
   </div>
@@ -212,7 +226,11 @@
           <option value="1" selected>1박</option>
           <option value="2">2박</option>
           <option value="4">4박</option>
+          <option value="bar">1마디</option>
         </select>
+      </label>
+      <label title="체크하면 드래그가 반 간격만큼 밀려서 채워집니다 — 예: 오른팔을 1박 간격(정박)으로 채운 뒤, 이 체크박스를 켜고 왼팔을 같은 1박 간격으로 드래그하면 정박은 그대로 두고 엇박(0.5박 사이사이)에만 채워져 교차 패턴이 만들어집니다.">
+        <input type="checkbox" id="chk-drag-offbeat"> 엇박
       </label>
       <div class="vel-mode-sel">
         <span class="vel-mode-label">강도</span>
@@ -253,7 +271,7 @@
   }
 }
 </script>
-<script src="js/intro_outro_presets.js?v=12"></script>
-<script type="module" src="js/app.js?v=12"></script>
+<script src="js/intro_outro_presets.js?v=13"></script>
+<script type="module" src="js/app.js?v=50"></script>
 </body>
 </html>

@@ -48,7 +48,7 @@ const VEL_GLOW = {
 // 완화되면서 직진성도 오히려 소폭 개선됐다(실측 검증).
 let drumKit = [
   // ─ L팔 ─────────────────────────────────────────────────────────
-  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.64, y: 0.41,  z:0.40} },
+  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.68, y: 0.14,  z:0.25} },
   { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.77, y: 0.31,  z:0.50} },
   { id:'d2', name:'스네어',      type:'snare', arm:'L', pos:{x:0.65, y: 0.14,  z:0.28} },
   { id:'d3', name:'스몰 탐',     type:'tom_h', arm:'L', pos:{x:0.76, y: 0.11,  z:0.50} },
@@ -92,7 +92,7 @@ window.resetDrumKit = function () {
   drumKit = DEFAULT_DRUM_KIT.map(d => ({...d, pos: {...d.pos}}));
   nextDrumId = DEFAULT_DRUM_KIT.length;
   saveDrumKit();
-  renderDrumList(); rebuildDrumSpheres(); renderTimeline();
+  rebuildDrumSpheres(); renderDrumList(); renderTimeline();
   _playKFs = buildFinalKeyframes(); _playDur = _playKFs.totalTime;
   setStatus('드럼 키트 기본값으로 초기화됨');
 };
@@ -183,7 +183,7 @@ window.applyDrumPreset = function (name) {
     if (p) Object.assign(d.pos, p);
   });
   saveDrumKit();
-  renderDrumList(); rebuildDrumSpheres(); renderTimeline();
+  rebuildDrumSpheres(); renderDrumList(); renderTimeline();
   _playKFs = buildFinalKeyframes(); _playDur = _playKFs.totalTime;
   setStatus(`"${name}" 템플릿 적용됨`);
 };
@@ -285,11 +285,38 @@ function loadTimeline() {
   } catch(e) {}
 }
 // 타임라인 이벤트 변경 후 공통 처리 (render + 키프레임 재빌드 + 저장)
-function _commitTimeline() {
+// ─ 드래그로 연속 채우기 중에는(매 mousemove마다 호출됨) 여기서 전체 레인을
+// 다시 그리고 곡 전체 키프레임(IK)을 재계산하면 마디 수가 많을수록(이 곡은
+// 118마디) 프레임마다 수백 ms가 걸려 드래그가 심하게 밀린다. 드래그 중엔
+// 새로 추가된 비트 점만 가볍게 DOM에 붙이고, 무거운 재계산은 드래그가
+// 끝나는 시점(mouseup)에 한 번만 몰아서 한다.
+let _tlDragActive = false;
+let _tlDragDirty  = false;
+function _commitTimeline(newEvts) {
+  if (_tlDragActive) {
+    _tlDragDirty = true;
+    if (newEvts) _tlAppendHits(newEvts);
+    return;
+  }
   renderTimeline();
   _playKFs = buildFinalKeyframes();
   _playDur = _playKFs.totalTime;
   saveTimeline();
+}
+
+// 드래그 중 추가/변경된 비트만 가볍게 그려 넣는다(전체 레인 재빌드 없이).
+// 이미 있던 점이면(반대쪽 절반 드래그로 팔이 바뀐 경우) 지우고 다시 그려
+// arm-L/arm-R 스타일이 최신 상태를 반영하게 한다.
+function _tlAppendHits(evts) {
+  evts.forEach(evt => {
+    const key = `${evt.drumId}_${evt.beat}`;
+    const lane = document.querySelector(`.tl-lane[data-drum-id="${evt.drumId}"]`);
+    const drum = drumKit.find(d => d.id === evt.drumId);
+    if (!lane || !drum) return;
+    const old = lane.querySelector(`.tl-hit[data-key="${key}"]`);
+    if (old) old.remove();
+    lane.appendChild(_createHitEl(drum, evt, drum.type !== 'kick'));
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -348,12 +375,23 @@ const MAX_REACH = 0.82;
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+// 정중앙류 드럼(예: 스네어)을 왼팔·오른팔이 번갈아 칠 때 스틱이 서로
+// 부딪히지 않도록, 실제 타격 목표점을 팔 쪽으로 살짝(Y축) 옮겨서 푼다.
+// 드럼의 "위치"(패널 X/Y/Z, 저장·YAML 내보내기)는 이 오프셋과 무관하게
+// 항상 실제 물리적 드럼 중심 그대로 유지된다 — IK가 겨냥하는 목표점만
+// 내부적으로 팔마다 다르게 계산될 뿐이다.
+const ARM_STRIKE_OFFSET_Y = 0.05;
+function _armStrikeTargetY(drum) {
+  if (drum.arm !== 'L' && drum.arm !== 'R') return drum.pos.y;   // 킥 등 팔 미배정
+  return drum.pos.y + ARM_STRIKE_OFFSET_Y * (drum.arm === 'L' ? 1 : -1);
+}
+
 function reachDist(drum) {
   // kick 등 팔 미배정 드럼은 가까운 쪽 루트 기준 (표시용)
   const root = ARM_ROOT[drum.arm] ?? ARM_ROOT[drum.pos.y >= 0 ? 'L' : 'R'];
   return Math.sqrt(
     (drum.pos.x - root.x) ** 2 +
-    (drum.pos.y - root.y) ** 2 +
+    (_armStrikeTargetY(drum) - root.y) ** 2 +
     (drum.pos.z - root.z) ** 2
   );
 }
@@ -420,10 +458,10 @@ function _pureFK(jointAngles, arm) {
 // J5(전완 롤)도 같은 이유로 한쪽만 허용한다 — 왼팔 J5<0이면 전완이
 // 돌아가며 팔이 몸 안쪽으로 말려 들어온다(크래쉬 타격에서 실측 확인).
 const _IK_LIMITS = {
-  L1:[-0.6, 0.05], L2:[-0.20, -0.13], L3:[-2.9, 2.9],
-  L4:[0.05, 1.70], L5:[-0.05, 2.9], L6:[-1.57, 1.57],
-  R1:[-0.05, 0.6], R2:[0.13, 0.20], R3:[-2.9, 2.9],
-  R4:[0.05, 1.70], R5:[-2.9, 0.05], R6:[-1.57, 1.57],
+  L1:[-0.6, 0.05], L2:[-0.20, -0.13], L3:[-0.6, 0.6],
+  L4:[0.05, 1.70], L5:[-0.05, 2.9], L6:[-0.6, 0.6],
+  R1:[-0.05, 0.6], R2:[0.13, 0.20], R3:[-0.6, 0.6],
+  R4:[0.05, 1.70], R5:[-2.9, 0.05], R6:[-0.6, 0.6],
 };
 
 // extraLimits: { 'L1':[-2,-0.25], 'L4':[0.28,1.70] } 등 관절별 한계 오버라이드
@@ -606,13 +644,15 @@ function _solveStickStrike(drum, vel) {
 
   // 관절 한계 — J4 최소 굽힘 정도만 강제하고, J1·J2·J6은 자유롭게 둔다.
   // (J1을 특정 방향으로 강제하면 "1번은 작게, 필요한 만큼만" 요구와 충돌한다)
+  const targetY = _armStrikeTargetY(drum);   // 팔별 좌우 오프셋이 반영된 실제 타격 목표 Y
+
   const extraLimits = {};
   if (isCymbal) {
     extraLimits[`${s}4`] = [0.28, 1.70];
   } else {
     const ar = ARM_ROOT[s];
     const dn = clamp(
-      Math.sqrt((drum.pos.x-ar.x)**2 + (drum.pos.y-ar.y)**2 + (drum.pos.z-ar.z)**2) / MAX_REACH,
+      Math.sqrt((drum.pos.x-ar.x)**2 + (targetY-ar.y)**2 + (drum.pos.z-ar.z)**2) / MAX_REACH,
       0, 1);
     extraLimits[`${s}4`] = [clamp((1 - dn) * 2.5, 0.22, 1.20), 1.70];
   }
@@ -631,7 +671,7 @@ function _solveStickStrike(drum, vel) {
   // 최선의 해를 고른다. (J1 절대값을 강제로 넓게 스윕하는 방식도 시도했으나
   // 계산이 느리고(7드럼 14초+) 관절 한계에 바짝 붙는 부자연스러운 해로
   // 이어져 폐기 — J5 시드만으로도 대부분 수직성 0.95+ 확보됨)
-  const target = new THREE.Vector3(drum.pos.x, drum.pos.y, drum.pos.z);
+  const target = new THREE.Vector3(drum.pos.x, targetY, drum.pos.z);
   // J5(전완 롤) 시드는 이제 "팔이 안쪽으로 말리지 않는" 방향(왼팔 양수·
   // 오른팔 음수)만 탐색한다 — _IK_LIMITS.L5/R5가 반대 부호를 이미 막고
   // 있으므로 그 반대쪽 시드는 클램프되어 낭비였다.
@@ -644,7 +684,7 @@ function _solveStickStrike(drum, vel) {
   // 해(팔꿈치를 굽혀 앞으로 뻗는 자세)가 탐색된다.
   // 우선 시도하고, 수직성이 이미 충분히 좋으면(>0.95) 바로 채택해 비용을 아낀다.
   const j1FwdSign = s === 'L' ? -1 : 1;
-  const J1_SEEDS = [j1FwdSign * 0.4, null];   // null = 해석적 추정치 그대로
+  const J1_SEEDS = [j1FwdSign * 0.4, j1FwdSign * 0.15, null];   // null = 해석적 추정치 그대로
 
   // raise 위상의 J7 (computeStrikePose와 동일 공식, medium velocity 기준)
   // — 후보 평가용. 관절 크기 자체엔 목표가 없다(가까운/먼 드럼 모두 필요한
@@ -687,10 +727,14 @@ function _solveStickStrike(drum, vel) {
   outer_seed:
   for (const j1Seed of J1_SEEDS) {
     for (const j5Seed of J5_SEEDS) {
-      let proxy = { x: drum.pos.x, y: drum.pos.y, z: drum.pos.z };
+      let proxy = { x: drum.pos.x, y: targetY, z: drum.pos.z };
       let best = null, bestErr = Infinity, init = null;
       const DAMPING = 0.5;
-      for (let outer = 0; outer < 14; outer++) {
+      // 14회로는 팔별 타격점 오프셋(ARM_STRIKE_OFFSET_Y)이 더해진 목표까지
+      // 종종 0.015 문턱 바로 위에서 그치는 경우가 있어(실측 확인) 22회로
+      // 늘렸다 — 각 outer 반복은 저렴하고(그레이디언트 IK 1회) 결과는
+      // 드럼 위치별로 캐시되므로 비용 부담은 작다.
+      for (let outer = 0; outer < 22; outer++) {
         if (!init) {
           const guess = _analyticGuess({ ...drum, pos: proxy }, 'strike');
           init = {};
@@ -708,7 +752,12 @@ function _solveStickStrike(drum, vel) {
         if (errLen < 0.004) break;
         proxy = { x: proxy.x + err.x * DAMPING, y: proxy.y + err.y * DAMPING, z: proxy.z + err.z * DAMPING };
       }
-      if (bestErr >= 0.015) continue;   // 이 시드는 수렴 실패 → 제외
+      // 0.03(3cm)까지 허용 — 팔별 타격점 오프셋(ARM_STRIKE_OFFSET_Y)을 더한
+      // 목표가, 손목 과다굴곡 방지용 L6/R6 한계(±0.6, 이전 실측으로 좁혀둠)에
+      // 막혀 0.015 문턱을 살짝 못 넘는 경우가 실측 확인됨(그 한계를 다시
+      // 풀면 예전에 고친 "손목 과도하게 꺾임" 문제가 재발한다) — 3cm는
+      // 드럼 헤드 크기 대비 시각적으로 무시할 만한 오차라 이 쪽을 완화.
+      if (bestErr >= 0.03) continue;   // 이 시드는 수렴 실패 → 제외
 
       const score = poseScore(best, raiseJ7, j7, false);
       if (score > overallScore) { overallScore = score; overallBest = best; overallBest._err = bestErr; }
@@ -738,10 +787,10 @@ function _solveStickStrike(drum, vel) {
       const DELTA_CANDIDATES = [...steps.map(m => -m), ...steps];
       for (const d of DELTA_CANDIDATES) {
         const j7Try = j7 + d;
-        let proxy = { x: drum.pos.x, y: drum.pos.y, z: drum.pos.z };
+        let proxy = { x: drum.pos.x, y: targetY, z: drum.pos.z };
         let init  = { ...overallBest };
         let cand  = overallBest, candErr = Infinity;
-        for (let outer = 0; outer < 14; outer++) {
+        for (let outer = 0; outer < 22; outer++) {
           const sol = _solveIK(s, proxy, init, j7Try,
                                 Object.keys(extraLimits).length ? extraLimits : undefined);
           [1,2,3,4,5,6].forEach(i => { init[`${s}${i}`] = sol[`${s}${i}`]; });
@@ -752,7 +801,7 @@ function _solveStickStrike(drum, vel) {
           if (errLen < 0.004) break;
           proxy = { x: proxy.x + err.x * 0.5, y: proxy.y + err.y * 0.5, z: proxy.z + err.z * 0.5 };
         }
-        if (candErr >= 0.015) continue;   // 웜스타트로도 수렴 실패 → 제외
+        if (candErr >= 0.03) continue;   // 웜스타트로도 수렴 실패 → 제외
 
         const candScore = poseScore(cand, raiseJ7 + d, j7Try, true);
         if (candScore > bestDeltaScore) {
@@ -765,7 +814,7 @@ function _solveStickStrike(drum, vel) {
   // 모든 시드가 수렴 실패한 극단적 경우에만 폴백(첫 시드 결과라도 사용)
   const solved  = finalPose ?? _analyticGuess(drum, 'strike');
   const errTip  = overallBest ? overallBest._err : 0.999;
-  const result = { pose: solved, ok: errTip < 0.015, j7Strike: j7 + contactDelta, nominalJ7: j7, contactDelta };
+  const result = { pose: solved, ok: errTip < 0.03, j7Strike: j7 + contactDelta, nominalJ7: j7, contactDelta };
   if (_strikeSolveCache.size > 300) _strikeSolveCache.clear();
   _strikeSolveCache.set(key, result);
   return result;
@@ -1015,7 +1064,16 @@ function buildKeyframes() {
           }
         }
 
-        addPose(poseMap, peakT, peak, sideKeys);
+        // 간격이 넉넉하면(빠른 연타가 아니면) 대부분을 "중립/준비 자세"로 대기
+        // 하다가 타격 직전에만 다음 드럼 쪽으로 스냅해 들어가고, 간격이 좁으면
+        // (빠른 연타) 기존처럼 peak(평균 경유 자세)로 쭉 이어서 자연스러운
+        // 흐름을 유지한다 — 사용자 피드백: 간격이 넉넉할 때 peak로 대기하면
+        // 쉬는 동안 계속 다음 타격 쪽으로 팔이 넘어가는 것처럼 보여 어색했음
+        // (빠르게 스냅하는 하이햇 연타와 대비돼 유독 느릿해 보임).
+        const IDLE_GAP_THRESHOLD = preDur * 3;
+        const useNeutralHold = gap > IDLE_GAP_THRESHOLD;
+
+        addPose(poseMap, peakT, useNeutralHold ? preLift[arm] : peak, sideKeys);
 
         // 피크 이후 다음 타격 직전까지 남는 시간 안에서 raise(B)를 한 번 더 찍는다.
         // 이렇게 하면 다른 드럼으로 넘어갈 때도 마지막 진입 구간만큼은 J1~J6 고정 +
@@ -1026,11 +1084,31 @@ function buildKeyframes() {
         const raiseLead = Math.min(preDur, availGap * 0.7);
         const raiseBT   = parseFloat((next.t - raiseLead).toFixed(3));
 
-        // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 많이 남으면(간격이
-        // 넓은 타격), 그 사이는 peak 자세로 숨쉬듯 대기 — 안 넣으면 peak와
-        // raiseB 두 점만으로 보간되어 그 긴 구간 내내 서서히 움직이는
-        // 것처럼 보인다(첫 타격 대기 때와 동일한 문제).
-        if (raiseBT > peakT) addBreathingHold(poseMap, peak, peakT, raiseBT, sideKeys);
+        if (useNeutralHold) {
+          // 중립 자세로 대기하다가, 타격 직전 짧게 peak(팔꿈치 리프트 +
+          // 중심선 안전 여유가 적용된 경유 자세)를 거쳐 raise(B)로 스냅한다.
+          // 스냅 구간을 preDur의 절반 정도로 짧게 잡아야 catmull-rom 보간이
+          // (다음 키프레임의 큰 변화를 미리 반영해) 중립 홀드 구간까지 앞당겨
+          // 서서히 움직이기 시작하는 것을 최소화한다 — 너무 넓게 잡으면
+          // 스냅 시작 훨씬 전부터 이미 다음 타격 쪽으로 미세하게 새기 시작한다.
+          const snapT = parseFloat(Math.max(peakT, raiseBT - preDur * 0.4).toFixed(3));
+          // addBreathingHold는 홀드 구간이 BREATH_HALF(0.9초)보다 짧으면 점을
+          // 하나도 안 찍는다 — 그러면 홀드 구간에 점이 peakT 하나뿐이라
+          // catmull-rom이 앞뒤(타격 자세·peak 자세)의 큰 변화를 반영해 접선을
+          // 기울여서, 홀드 구간 내내 서서히 움직이는 것처럼 보인다(실측 확인).
+          // 홀드 구간 중간에 같은 자세를 한 번 더 찍어 접선을 평평하게 고정한다.
+          if (snapT > peakT) {
+            const midT = parseFloat(((peakT + snapT) / 2).toFixed(3));
+            if (midT > peakT && midT < snapT) addPose(poseMap, midT, preLift[arm], sideKeys);
+            addBreathingHold(poseMap, preLift[arm], peakT, snapT, sideKeys);
+            addPose(poseMap, snapT, peak, sideKeys);
+          }
+        } else {
+          // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 남으면 그 사이는
+          // peak 자세로 숨쉬듯 대기 — 안 넣으면 peak와 raiseB 두 점만으로
+          // 보간되어 그 구간 내내 서서히 움직이는 것처럼 보인다.
+          if (raiseBT > peakT) addBreathingHold(poseMap, peak, peakT, raiseBT, sideKeys);
+        }
 
         if (raiseLead > 0.03 && raiseBT > peakT) {
           addPose(poseMap, raiseBT, posB, sideKeys);
@@ -1222,8 +1300,8 @@ window.importProject = function (input) {
       saveDrumKit();
       saveTimeline();
       saveSettings();
-      renderDrumList();
       rebuildDrumSpheres();
+      renderDrumList();
       renderPresetDropdown();
       renderTimeline();
       updateTLInfo();
@@ -2020,18 +2098,67 @@ function rebuildDrumSpheres() {
     grp.add(base);
   });
 
-  drumKit.forEach(drum => _updateDrumReachVisual(drum));
+  drumKit.forEach(drum => _updateDrumReachVisual(drum, true));
 }
 
 // 팔이 닿지 않는 위치로 옮겨졌을 때 드럼 헤드 색을 빨간색으로 바꿔 재생 없이도
 // 바로 알 수 있게 한다(킥은 팔 미배정이라 대상 아님).
-function _updateDrumReachVisual(drum) {
+function _updateDrumReachVisual(drum, force) {
   const mesh = drumMeshes[drum.id];
   if (!mesh || drum.type === 'kick') return;
   const unreachable = reachDist(drum) > STICK_REACH;
   const baseColor = unreachable ? 0xe04040 : DRUM_TYPES[drum.type].color;
   mesh.material.color.set(baseColor);
   mesh.material.emissive.set(baseColor).multiplyScalar(0.20);
+  _updateArmReachBadges(drum, force);
+}
+
+// ── 팔별 실제 도달 가능 여부(단순 거리가 아니라 IK 수렴 기준) ──
+// 드럼 위치가 바뀔 때마다 왼팔/오른팔 각각 실제로 자연스럽게 닿는지 확인해
+// 드럼 키트 패널의 L/R 배지와 타임라인 레인의 절반 음영으로 즉시 보여준다.
+// setEventArm()의 경고 로직과 동일한 기준(거리 + _solveStickStrike().ok)을 쓴다.
+function _armReachOk(drum, arm) {
+  if (drum.type === 'kick') return true;
+  const test = { ...drum, arm };
+  if (reachDist(test) > STICK_REACH) return false;
+  return _solveStickStrike(test, 'medium').ok;
+}
+
+// IK 수렴 확인은 드래그 중 매 mousemove마다 돌리기엔 무겁다 — 배지·레인
+// 음영은 150ms에 한 번만 갱신(드럼 헤드 색은 위에서 이미 즉시 갱신됨).
+let _reachBadgeTs = 0;
+function _updateArmReachBadges(drum, force) {
+  if (drum.type === 'kick') return;
+  // 뷰포트에서 드럼을 드래그하는 동안은(force 없이 호출되는 매 mousemove)
+  // 이 IK 계산을 건너뛴다 — 실측 결과 드래그 중 150ms 스로틀로도 여전히
+  // 버벅임이 심했다(_solveStickStrike가 시드 여러 개를 도는 반복 계산이라
+  // 드래그처럼 위치가 매 프레임 달라지면 캐시도 못 타 매번 새로 풂).
+  // 드래그 중엔 색상만(reachDist 기반, 이미 별도로 즉시 갱신됨) 보여주고,
+  // 정확한 L/R 배지·타임라인 음영은 드래그가 끝나는 순간(mouseup, force
+  // 호출)이나 숫자 입력 시에만 계산한다.
+  if (!force && _isDragging) return;
+  const now = performance.now();
+  if (!force && now - _reachBadgeTs < 150) return;
+  _reachBadgeTs = now;
+
+  const okL = _armReachOk(drum, 'L');
+  const okR = _armReachOk(drum, 'R');
+  drum._reachL = okL;
+  drum._reachR = okR;
+
+  const badge = document.querySelector(`.drum-row[data-id="${drum.id}"] .drum-reach-badge`);
+  if (badge) {
+    const bl = badge.querySelector('.reach-l');
+    const br = badge.querySelector('.reach-r');
+    if (bl) { bl.classList.toggle('ok', okL); bl.classList.toggle('bad', !okL); bl.title = `왼팔 — ${okL ? '타격 가능' : '현재 위치에서 도달 불가(자세 부자연)'}`; }
+    if (br) { br.classList.toggle('ok', okR); br.classList.toggle('bad', !okR); br.title = `오른팔 — ${okR ? '타격 가능' : '현재 위치에서 도달 불가(자세 부자연)'}`; }
+  }
+
+  const lane = document.querySelector(`.tl-lane[data-drum-id="${drum.id}"]`);
+  if (lane) {
+    lane.classList.toggle('half-l-unreachable', !okL);
+    lane.classList.toggle('half-r-unreachable', !okR);
+  }
 }
 
 // ── 재생 상태 ────────────────────────────────────────────────
@@ -2040,6 +2167,7 @@ let startWall   = 0, pauseOffset = 0;
 let _playKFs    = { L: [], R: [], totalTime: 0 };
 let _playDur    = 0;
 let _flashState = {};
+let _playbackSpeed = 1;   // 참고 영상과 세밀하게 비교할 때 느리게 재생하기 위한 배속
 
 function smoothStep(t) { return t * t * (3 - 2 * t); }
 
@@ -2439,12 +2567,27 @@ window.playAnim = function () {
   _playDur = _playKFs.totalTime;
   if (!timelineEvents.length) { alert('타임라인에 드럼 이벤트를 추가하세요.'); return; }
   document.getElementById('scrubber').max = _playDur;
-  startWall = performance.now() - pauseOffset * 1000;
+  startWall = performance.now() - (pauseOffset / _playbackSpeed) * 1000;
   isPlaying = true;
   _playAudio(pauseOffset);
   _syncRefVideo(pauseOffset);
-  _refVideoEl()?.play().catch(() => {});
+  if (_refVideoAudioCtx?.state === 'suspended') _refVideoAudioCtx.resume();
+  const v = _refVideoEl();
+  if (v) { v.playbackRate = _playbackSpeed; v.play().catch(() => {}); }
   _syncPlayBtns();
+};
+
+// 참고 영상과 프레임 단위로 세밀하게 비교할 때 실시간 재생은 너무 빨라
+// 보이므로(특히 압축 영상은 currentTime을 자주 바꾸면 키프레임 단위로만
+// 스킵돼 뚝뚝 끊겨 보인다) 배속을 낮춰 "연속 재생"으로 천천히 보는 편이
+// 개별 프레임을 seek하는 것보다 훨씬 자연스럽다.
+window.setPlaybackSpeed = function (v) {
+  const newSpeed = parseFloat(v) || 1;
+  if (isPlaying) startWall = performance.now() - (pauseOffset / newSpeed) * 1000;
+  _playbackSpeed = newSpeed;
+  if (_audioSrc) _audioSrc.playbackRate.value = _playbackSpeed;
+  const video = _refVideoEl();
+  if (video) video.playbackRate = _playbackSpeed;
 };
 window.pauseAnim = function () {
   if (!isPlaying) return;
@@ -2475,16 +2618,18 @@ function updateTimeLbl(t) {
   document.getElementById('time-lbl').textContent = `${t.toFixed(2)} / ${_playDur.toFixed(1)} s`;
 }
 
-document.getElementById('scrubber').addEventListener('input', function () {
-  const t = parseFloat(this.value);
-  pauseOffset = t;
+// 스크러버 드래그·타임라인 눈금 클릭·방향키 이동이 전부 공유하는 seek 로직.
+function seekTo(t) {
   if (!(_playKFs.L?.length ?? _playKFs.flat?.length)) {
     _playKFs = buildFinalKeyframes();
     _playDur = _playKFs.totalTime;
-    this.max = _playDur;
+    document.getElementById('scrubber').max = _playDur;
   }
+  t = clamp(t, 0, _playDur || 0);
+  pauseOffset = t;
+  document.getElementById('scrubber').value = t;
   // 재생 중 seek: startWall을 새 위치 기준으로 재계산 → 애니메이션 루프가 덮어쓰지 않음
-  if (isPlaying) startWall = performance.now() - t * 1000;
+  if (isPlaying) startWall = performance.now() - (t / _playbackSpeed) * 1000;
   updateFK(interpolateAngles(t, _playKFs));
   updateTimeLbl(t);
   _updatePlayhead(t);
@@ -2493,7 +2638,56 @@ document.getElementById('scrubber').addEventListener('input', function () {
   _syncRefVideo(t);
   if (isPlaying) _refVideoEl()?.play().catch(() => {});
   else _refVideoEl()?.pause();
+}
+
+document.getElementById('scrubber').addEventListener('input', function () {
+  seekTo(parseFloat(this.value));
 });
+
+// ◀/▶ 버튼과 방향키(←/→) 이동 — dir=-1/1, beatStep=true면 현재 비트 스냅
+// 분해능(예: 1/8박) 단위로, false면 1프레임(1/60초) 단위로 움직인다.
+// 참고 영상과 비교하며 정확히 어느 프레임에 어떤 타격이 맞는지 확인할 때 씀.
+window.stepPlayhead = function (dir, beatStep) {
+  const beatDur   = 60 / bpm;
+  const div       = parseInt(document.getElementById('grid-sel')?.value || 8);
+  const snapUnit  = 4 / div;   // 비트 단위(예: 1/8 분해능 → 0.5박)
+  const step      = beatStep ? snapUnit * beatDur : (1 / 60);
+  seekTo(pauseOffset + dir * step);
+};
+
+// 텍스트 입력·셀렉트에 포커스가 있을 때는 방향키를 가로채지 않는다(타이핑 방해 방지).
+// scrubber(input[type=range])에 포커스가 있으면 브라우저 기본 동작(자체 step)에 맡긴다.
+document.addEventListener('keydown', e => {
+  const tag = document.activeElement?.tagName;
+  // 스페이스바 재생/일시정지 — 포커스가 버튼에 있으면 스페이스가 그 버튼을
+  // 누르는 기본 동작과 겹쳐 이중 토글이 될 수 있으니 그때만 기본 동작에 맡긴다.
+  if (e.code === 'Space' || e.key === ' ') {
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
+    e.preventDefault();
+    if (isPlaying) window.pauseAnim(); else window.playAnim();
+    return;
+  }
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  e.preventDefault();
+  stepPlayhead(e.key === 'ArrowRight' ? 1 : -1, e.shiftKey);
+});
+
+// 타임라인 눈금(초/마디·박자 행)을 클릭하면 그 위치로 바로 이동 — 지금까지는
+// 뷰포트 아래 재생바(스크러버)로만 이동할 수 있어 번거로웠다.
+function _seekFromRulerClick(e) {
+  const el   = e.currentTarget;
+  const rect = el.getBoundingClientRect();   // left에 스크롤이 이미 반영돼 있음(beatFromEvent 참고)
+  const x    = clamp(e.clientX - rect.left, 0, totalBars * beatsPerBar * PX_PER_BEAT);
+  const totalW    = totalBars * beatsPerBar * PX_PER_BEAT;
+  const introDur  = _getAudioTimeOffset();
+  const outroDur  = (document.getElementById('chk-outro')?.checked ?? true) ? 4.0 : 0.0;
+  const drumDur   = Math.max(0.01, (_playDur || 0) - introDur - outroDur);
+  const drumT     = totalW > 0 ? (x / totalW) * drumDur : 0;
+  seekTo(introDur + drumT);
+}
+document.getElementById('tl-ruler-sec').addEventListener('click', _seekFromRulerClick);
+document.getElementById('tl-ruler').addEventListener('click', _seekFromRulerClick);
 
 // 정지/일시정지 상태에서 편집(강도 변경·스트로크 튜닝 등) 직후 현재 위치의
 // 포즈를 즉시 다시 그린다. 재생 중엔 animate() 루프가 매 프레임 갱신하므로
@@ -2543,7 +2737,7 @@ function animate() {
 
   let t = pauseOffset;
   if (isPlaying && _playDur > 0) {
-    t = ((performance.now() - startWall) / 1000) % _playDur;
+    t = ((performance.now() - startWall) / 1000 * _playbackSpeed) % _playDur;
     pauseOffset = t;
     document.getElementById('scrubber').value = t;
     updateTimeLbl(t);
@@ -2655,6 +2849,63 @@ async function _autoLoadDefaultSong() {
 let videoOffset = 0;
 function _refVideoEl() { return document.getElementById('ref-video-el'); }
 
+// 업로드한 참고 영상 파일 자체(Blob)를 IndexedDB에 저장해, 새로고침해도
+// "제거" 버튼을 누르기 전까지는 다시 불러올 필요 없이 유지되게 한다.
+// localStorage는 용량이 작아(수MB) 영상 파일엔 안 맞아 IndexedDB를 쓴다.
+const _REF_VIDEO_DB = 'magicexe_ref_video_db', _REF_VIDEO_STORE = 'video';
+function _openRefVideoDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(_REF_VIDEO_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(_REF_VIDEO_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+async function _saveRefVideoToDB(file) {
+  try {
+    const db = await _openRefVideoDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(_REF_VIDEO_STORE, 'readwrite');
+      tx.objectStore(_REF_VIDEO_STORE).put({ blob: file, name: file.name }, 'current');
+      tx.oncomplete = resolve;
+      tx.onerror    = () => reject(tx.error);
+    });
+  } catch (e) { /* IndexedDB 사용 불가 환경 — 이번 세션에서만 유지됨 */ }
+}
+async function _loadRefVideoFromDB() {
+  try {
+    const db = await _openRefVideoDB();
+    return await new Promise((resolve, reject) => {
+      const tx  = db.transaction(_REF_VIDEO_STORE, 'readonly');
+      const req = tx.objectStore(_REF_VIDEO_STORE).get('current');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror   = () => reject(req.error);
+    });
+  } catch (e) { return null; }
+}
+async function _clearRefVideoDB() {
+  try {
+    const db = await _openRefVideoDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(_REF_VIDEO_STORE, 'readwrite');
+      tx.objectStore(_REF_VIDEO_STORE).delete('current');
+      tx.oncomplete = resolve;
+      tx.onerror    = () => reject(tx.error);
+    });
+  } catch (e) {}
+}
+// 페이지 로드 시 저장된 영상이 있으면 자동 복원
+(async function _restoreRefVideo() {
+  const rec = await _loadRefVideoFromDB();
+  if (!rec) return;
+  const video = _refVideoEl();
+  if (!video) return;
+  video.src = URL.createObjectURL(rec.blob);
+  const nameEl = document.getElementById('ref-video-name');
+  if (nameEl) nameEl.textContent = rec.name;
+  setStatus(`참고 영상 복원: ${rec.name}`);
+})();
+
 window.toggleRefVideoPanel = function () {
   document.getElementById('video-panel')?.classList.toggle('collapsed');
 };
@@ -2673,7 +2924,20 @@ window.loadRefVideo = function (input) {
   video.src = URL.createObjectURL(file);
   const nameEl = document.getElementById('ref-video-name');
   if (nameEl) nameEl.textContent = file.name;
+  _ensureRefVideoGain();   // 사용자가 파일을 고른 시점(제스처)에 오디오 그래프 준비
+  _saveRefVideoToDB(file);
   setStatus(`참고 영상 로드: ${file.name} — 오프셋을 조절해 음악 시작 지점과 맞추세요`);
+};
+
+window.clearRefVideo = function () {
+  const video = _refVideoEl();
+  if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
+  const nameEl = document.getElementById('ref-video-name');
+  if (nameEl) nameEl.textContent = '파일 없음';
+  const fileInput = document.getElementById('ref-video-file');
+  if (fileInput) fileInput.value = '';
+  _clearRefVideoDB();
+  setStatus('참고 영상 제거됨');
 };
 
 window.setRefVideoOffset = function (val) {
@@ -2686,6 +2950,35 @@ window.toggleRefVideoMute = function () {
   video.muted = !video.muted;
   const btn = document.getElementById('ref-video-mute-btn');
   if (btn) btn.textContent = video.muted ? '🔇' : '🔊';
+};
+
+// 참고 영상 자체 소리 크기 — <video>의 기본 volume은 0~1(100%)까지만 되고
+// 원본 녹화 음량이 작으면 그 이상 키울 방법이 없다. Web Audio GainNode를
+// 거치게 하면 100%(1.0)를 넘겨 원본보다 증폭할 수 있다(최대 250%).
+// createMediaElementSource는 같은 <video> 엘리먼트에 대해 딱 한 번만 호출
+// 가능하므로(두 번째 호출은 예외 발생) _refVideoGainNode가 있으면 재사용.
+let _refVideoAudioCtx  = null;
+let _refVideoGainNode  = null;
+function _ensureRefVideoGain() {
+  if (_refVideoGainNode) return _refVideoGainNode;
+  const video = _refVideoEl();
+  if (!video) return null;
+  try {
+    _refVideoAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = _refVideoAudioCtx.createMediaElementSource(video);
+    _refVideoGainNode = _refVideoAudioCtx.createGain();
+    _refVideoGainNode.gain.value = parseFloat(document.getElementById('ref-video-volume')?.value) || 1;
+    src.connect(_refVideoGainNode).connect(_refVideoAudioCtx.destination);
+  } catch (e) { /* 이미 다른 곳에서 연결된 경우 등 — 무시 */ }
+  return _refVideoGainNode;
+}
+window.setRefVideoVolume = function (val) {
+  const v = parseFloat(val) || 0;
+  const gain = _ensureRefVideoGain();
+  if (_refVideoAudioCtx?.state === 'suspended') _refVideoAudioCtx.resume();
+  if (gain) gain.gain.value = v;
+  const lbl = document.getElementById('ref-video-volume-val');
+  if (lbl) lbl.textContent = Math.round(v * 100) + '%';
 };
 
 // 타임라인 시간(t, 인트로 포함) → 참고 영상 재생 위치로 변환해 맞춘다.
@@ -2720,10 +3013,12 @@ function _playAudio(timelineOffset) {
 
   _audioSrc = _audioCtx.createBufferSource();
   _audioSrc.buffer = _audioBuf;
+  _audioSrc.playbackRate.value = _playbackSpeed;
   _audioSrc.connect(_audioCtx.destination);
   _audioPlayOff   = clamp(audioFilePos, 0, _audioBuf.duration);
-  _audioStartCtxT = _audioCtx.currentTime + startDelay;
-  _audioSrc.start(_audioCtx.currentTime + startDelay, _audioPlayOff);
+  const realStartDelay = startDelay / _playbackSpeed;   // 배속으로 늘어난 인트로 대기 시간만큼 지연
+  _audioStartCtxT = _audioCtx.currentTime + realStartDelay;
+  _audioSrc.start(_audioCtx.currentTime + realStartDelay, _audioPlayOff);
 }
 
 function _pauseAudio() {
@@ -2828,6 +3123,8 @@ renderer.domElement.addEventListener('mouseup', () => {
     saveDrumKit();
     _checkTemplateDirty();
     renderDrumList();
+    const dragged = drumKit.find(d => d.id === _dragDrumId);
+    if (dragged) _updateDrumReachVisual(dragged, true);
     _playKFs = buildFinalKeyframes();
     _playDur = _playKFs.totalTime;
     _dragDrumId = null;
@@ -2846,6 +3143,37 @@ renderer.domElement.addEventListener('mouseleave', () => {
 // ═══════════════════════════════════════════════════════════════
 //  타임라인 렌더링 (피아노 롤)
 // ═══════════════════════════════════════════════════════════════
+
+// 비트 1개의 DOM 엘리먼트 생성 — renderTimeline()의 전체 재빌드와, 드래그
+// 중 가벼운 개별 추가(_tlAppendHits) 양쪽에서 공용으로 쓴다.
+function _createHitEl(drum, evt, splitArm, typeInfo) {
+  typeInfo = typeInfo || DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
+  const vel = evt.vel ?? 'medium';
+  const x   = (evt.beat - 1) * PX_PER_BEAT;
+  const effArm  = _effArm(evt) || drum.arm;
+  const armCls  = !splitArm ? 'arm-none' : effArm === 'L' ? 'arm-L' : 'arm-R';
+  const hit = document.createElement('div');
+  hit.className      = `tl-hit vel-${vel} ${armCls}`;
+  hit.dataset.vel    = vel;
+  hit.dataset.key    = `${drum.id}_${evt.beat}`;
+  hit.style.left     = x + 'px';
+  hit.style.background  = typeInfo.color;
+  hit.style.boxShadow   = VEL_GLOW[vel](typeInfo.color);
+  const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
+  const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
+  hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
+  hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat); });
+  hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(e.clientX, e.clientY, drum.id, evt.beat, effArm); });
+  hit.addEventListener('contextmenu', e => {
+    e.preventDefault(); e.stopPropagation();
+    // 오른쪽 드래그 지우개가 방금 끝난 직후의 트레일링 contextmenu가 남아있는
+    // 점 위에 떨어지면, 의도치 않게 그 점까지 하나 더 지워버리는 걸 방지.
+    if (performance.now() < _tlDragSuppressClickUntil) return;
+    removeEvent(drum.id, evt.beat);
+  });
+  return hit;
+}
+
 function renderTimeline() {
   updatePxPerBeat();
   const totalBeats = totalBars * beatsPerBar;
@@ -2918,7 +3246,9 @@ function renderTimeline() {
   drumKit.forEach(drum => {
     const lane = document.createElement('div');
     const splitArm = drum.type !== 'kick'; // 킥은 팔이 없어 구분 안 함
-    lane.className       = 'tl-lane' + (splitArm ? ' split' : '');
+    lane.className       = 'tl-lane' + (splitArm ? ' split' : '')
+      + (splitArm && drum._reachL === false ? ' half-l-unreachable' : '')
+      + (splitArm && drum._reachR === false ? ' half-r-unreachable' : '');
     lane.style.width     = totalW + 'px';
     lane.dataset.drumId  = drum.id;
     const typeInfo = DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
@@ -2945,31 +3275,17 @@ function renderTimeline() {
     }
 
     timelineEvents.filter(e => e.drumId === drum.id).forEach(evt => {
-      const vel = evt.vel ?? 'medium';
-      const x   = (evt.beat - 1) * PX_PER_BEAT;
-      const effArm  = _effArm(evt) || drum.arm;
-      const armCls  = !splitArm ? 'arm-none' : effArm === 'L' ? 'arm-L' : 'arm-R';
-      const hit = document.createElement('div');
-      hit.className      = `tl-hit vel-${vel} ${armCls}`;
-      hit.dataset.vel    = vel;
-      hit.dataset.key    = `${drum.id}_${evt.beat}`;
-      hit.style.left     = x + 'px';
-      hit.style.background  = typeInfo.color;
-      hit.style.boxShadow   = VEL_GLOW[vel](typeInfo.color);
-      const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
-      const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
-      hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
-      hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat); });
-      hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(e.clientX, e.clientY, drum.id, evt.beat, effArm); });
-      hit.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); removeEvent(drum.id, evt.beat); });
-      lane.appendChild(hit);
+      lane.appendChild(_createHitEl(drum, evt, splitArm, typeInfo));
     });
 
     function beatFromEvent(e) {
-      const rect    = lane.getBoundingClientRect();
-      const scrollL = document.getElementById('tl-scroll')?.scrollLeft || 0;
-      const rawX    = e.clientX - rect.left + scrollL;
-      let beat      = rawX / PX_PER_BEAT + 1;
+      // lane.getBoundingClientRect()의 left는 가로 스크롤이 반영된 값이라
+      // (스크롤할수록 점점 더 음수) 여기에 scrollLeft를 또 더하면 스크롤한
+      // 만큼 이중으로 계산돼, 타임라인을 스크롤한 상태에서 클릭하면 전혀
+      // 엉뚱한(스크롤한 만큼 더 뒤의) 박자에 비트가 찍히는 버그가 있었다.
+      const rect = lane.getBoundingClientRect();
+      const rawX = e.clientX - rect.left;
+      let beat   = rawX / PX_PER_BEAT + 1;
       if (document.getElementById('chk-snap')?.checked) {
         const snapUnit = 4 / div;
         beat = Math.round(beat / snapUnit) * snapUnit;
@@ -2987,15 +3303,31 @@ function renderTimeline() {
 
     lane.addEventListener('click', e => {
       if (e.target.classList.contains('tl-hit')) return;
-      if (_tlDragOccurred) { _tlDragOccurred = false; return; } // 드래그 직후의 클릭은 무시(중복 토글 방지)
+      if (performance.now() < _tlDragSuppressClickUntil) return; // 드래그 직후의 트레일링 클릭은 무시(중복 토글 방지)
       addEvent(drum.id, beatFromEvent(e), armFromEvent(e));
     });
 
     // 드래그로 일정 간격마다 반복 채우기 — mousemove/mouseup은 document에 한 번만
     // 등록해 커서가 레인 밖으로 살짝 벗어나도 드래그가 끊기지 않게 한다.
     lane.addEventListener('mousedown', e => {
+      if (e.button === 2) {
+        // 오른쪽 버튼 드래그 = 지우개 — 왼쪽 드래그(채우기)와 대칭. 지금까진
+        // 드래그로 채운 걸 되돌리려면 점 하나하나 우클릭해야 해서 번거로웠다.
+        // 간격 개념 없이, 드래그가 지나간 범위 안의 비트를 전부 지운다.
+        e.preventDefault();
+        _tlErase = { drumId: drum.id, startBeat: beatFromEvent(e) };
+        _tlDragActive = true;
+        _tlDragDirty  = false;
+        return;
+      }
       if (e.button !== 0 || e.target.classList.contains('tl-hit')) return;
       _tlDrag = { drumId: drum.id, lane, startBeat: beatFromEvent(e), arm: armFromEvent(e), filled: new Set() };
+      _tlDragActive = true;
+      _tlDragDirty  = false;
+    });
+    lane.addEventListener('contextmenu', e => {
+      // 지우개 드래그 중이거나 방금 끝난 직후엔 OS 우클릭 메뉴가 뜨지 않게 한다.
+      if (_tlErase || performance.now() < _tlDragSuppressClickUntil) e.preventDefault();
     });
 
     lanesEl.appendChild(lane);
@@ -3143,11 +3475,16 @@ function removeEvent(drumId, beat) {
   }
 }
 
-// 이미 있으면 건드리지 않고 새 것만 추가 — addEvent는 같은 자리를 다시 누르면
-// 토글(삭제)하므로, 드래그로 같은 위치를 여러 번 지나가도 지워지지 않게 분리.
+// 이미 있으면 새로 추가하지 않음 — addEvent는 같은 자리를 다시 누르면 토글
+// (삭제)하므로, 드래그로 같은 위치를 여러 번 지나가도 지워지지 않게 분리.
+// 단, 이미 있는 비트를 "반대쪽 절반"으로 다시 드래그하면(왼팔 구간 드래그
+// 후 같은 자리를 오른팔 구간으로 다시 드래그하는 등) 팔을 그 자리에서
+// 바꿔준다 — 그래야 왼팔 드래그·오른팔 드래그를 교차시켜 번갈아 치는
+// 패턴을 만들 수 있다(그전엔 이미 채워진 자리는 무조건 무시돼 불가능했음).
 function addEventIfMissing(drumId, beat, arm) {
-  const exists = timelineEvents.some(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
-  if (!exists) addEvent(drumId, beat, arm);
+  const existing = timelineEvents.find(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
+  if (!existing) { addEvent(drumId, beat, arm); return; }
+  if ((arm === 'L' || arm === 'R') && _effArm(existing) !== arm) setEventArm(drumId, beat, arm);
 }
 
 // ── 타임라인 레인 드래그 → 지정 간격마다 반복 채우기 ─────────────────
@@ -3156,7 +3493,20 @@ function addEventIfMissing(drumId, beat, arm) {
 // 채운다. mousemove/mouseup은 레인이 renderTimeline()마다 다시 생성되므로
 // document에 한 번만 등록해 리스너가 쌓이지 않게 한다.
 let _tlDrag = null;          // { drumId, lane, startBeat, filled }
-let _tlDragOccurred = false; // 드래그가 실제로 일어났으면 뒤이은 click을 무시
+let _tlDragOccurred = false; // 이번 드래그에서 실제 이동(임계값 이상)이 있었는지
+// 드래그 종료 후 이 시각(performance.now() 기준)까지의 클릭은 "드래그의 뒤이은
+// 클릭"으로 간주해 무시한다(중복 토글 방지). 예전엔 불리언 플래그(_tlDragOccurred)를
+// click 핸들러에서 소비했는데, 그 트레일링 클릭이 방금 드래그로 막 생겨난
+// .tl-hit 점 위에 떨어지면 click 핸들러가 `e.target이 tl-hit`라서 플래그를
+// 리셋하지 못한 채 조기 반환 — 그러면 플래그가 계속 true로 남아 그다음
+// "진짜" 새 클릭(전혀 다른 위치)까지 통째로 씹혀버리는 버그가 있었다
+// (드래그로 쭉 채우고 이어서 하나 더 추가하려 하면 안 먹히는 현상).
+// 시간 기반 창으로 바꾸면 클릭의 target이 무엇이든 일정 시간 후 자동으로
+// 풀려서 이후 클릭을 영구히 막지 않는다.
+let _tlDragSuppressClickUntil = 0;
+
+let _tlErase = null;          // { drumId, startBeat } — 오른쪽 버튼 드래그로 지우는 중
+let _tlEraseOccurred = false; // 실제 지우개 드래그가 있었는지(트레일링 contextmenu 억제용)
 
 document.addEventListener('mousemove', e => {
   if (!_tlDrag) return;
@@ -3167,37 +3517,89 @@ document.addEventListener('mousemove', e => {
   // 매번 현재 DOM에서 다시 찾는다.
   const lane = document.querySelector(`.tl-lane[data-drum-id="${_tlDrag.drumId}"]`);
   if (!lane) { _tlDrag = null; return; }
-  const rect    = lane.getBoundingClientRect();
-  const scrollL = document.getElementById('tl-scroll')?.scrollLeft || 0;
-  const rawX    = e.clientX - rect.left + scrollL;
+  const rect    = lane.getBoundingClientRect();   // left에 스크롤이 이미 반영돼 있음(beatFromEvent 참고)
+  const rawX    = e.clientX - rect.left;
   const curBeat = rawX / PX_PER_BEAT + 1;
 
   if (!_tlDragOccurred && Math.abs(curBeat - startBeat) < 0.05) return; // 미세한 움직임은 클릭으로 취급
   _tlDragOccurred = true;
 
-  const interval   = parseFloat(document.getElementById('drag-interval-sel')?.value) || 1;
+  // "1마디"는 박자표에 따라 실제 박 수가 달라지므로(3/4=3박, 4/4=4박) 고정
+  // 숫자 대신 beatsPerBar를 그때그때 읽어 계산한다 — 3/4박자에선 2박·4박
+  // 간격이 마디 경계와 안 맞아(3의 배수가 아니라서) 매번 다른 박에 걸리는데,
+  // "1마디"를 쓰면 항상 마디 시작(1박, 정박)에만 정확히 채울 수 있다.
+  const intervalSel = document.getElementById('drag-interval-sel')?.value;
+  const interval     = intervalSel === 'bar' ? beatsPerBar : (parseFloat(intervalSel) || 1);
   const totalBeats = totalBars * beatsPerBar;
   const lo = Math.min(startBeat, curBeat);
   const hi = Math.max(startBeat, curBeat);
-  // 비트 1을 기준으로 한 전역 간격 그리드(1, 1+interval, 1+2*interval, ...) 중
-  // 드래그 구간에 걸치는 위치만 골라 채운다.
-  const firstK = Math.ceil((lo - 1) / interval);
-  const lastK  = Math.floor((hi - 1) / interval);
-  let addedAny = false;
+  // 간격 그리드의 기준점 — 드래그를 시작한 위치를 "비트 1 기준 전역 간격
+  // 그리드"(1, 1+interval, 2+interval, ...)에 먼저 스냅한 뒤, "엇박" 체크박스가
+  // 켜져 있으면 반 칸(interval/2)을 더한다. 예전엔 항상 정확히 1 기준이라,
+  // 이미 다른 팔로 채워진 자리 "사이"(예: 1.5박)에서 드래그를 시작해도 그
+  // 시작점이 그리드에 없어 짧게 드래그하면 아무것도 안 채워지는 문제가
+  // 있었다(스냅으로 해결). 엇박 체크박스는 오른팔을 정박(1,2,3..)으로 채운
+  // 뒤 왼팔을 "같은 간격"으로 다시 드래그해도 정박을 덮어쓰지 않고 엇박
+  // (1.5, 2.5, ...)에만 채워 교차 패턴을 쉽게 만들 수 있게 해준다 — 마우스로
+  // 정확히 반 칸 위치를 클릭할 필요가 없다.
+  const offbeat    = document.getElementById('chk-drag-offbeat')?.checked;
+  const gridAnchor = Math.round((startBeat - 1) / interval) * interval + 1
+                     + (offbeat ? interval / 2 : 0);
+  const firstK = Math.ceil((lo - gridAnchor) / interval);
+  const lastK  = Math.floor((hi - gridAnchor) / interval);
+  const addedEvts = [];
   for (let k = firstK; k <= lastK; k++) {
-    const beat = parseFloat((1 + k * interval).toFixed(4));
+    const beat = parseFloat((gridAnchor + k * interval).toFixed(4));
     if (beat < 1 || beat > totalBeats + 1) continue;
     const key = beat.toFixed(4);
     if (filled.has(key)) continue;
     filled.add(key);
     const before = timelineEvents.length;
     addEventIfMissing(_tlDrag.drumId, beat, _tlDrag.arm);
-    if (timelineEvents.length !== before) addedAny = true;
+    if (timelineEvents.length !== before) {
+      addedEvts.push(timelineEvents[timelineEvents.length - 1]);   // 새로 추가된 비트
+    } else {
+      const changed = timelineEvents.find(e => e.drumId === _tlDrag.drumId && Math.abs(e.beat - beat) < 0.01);
+      if (changed) addedEvts.push(changed);   // 팔이 바뀌었을 수도 있는 기존 비트 — 점 다시 그리기
+    }
   }
-  if (addedAny) _commitTimeline();
+  if (addedEvts.length) _commitTimeline(addedEvts);
 });
 
-document.addEventListener('mouseup', () => { _tlDrag = null; });
+// 오른쪽 버튼 드래그 지우개 — 간격 개념 없이, 드래그가 지나간 범위(시작~현재
+// 커서 사이 박자) 안에 있는 이 드럼의 비트를 전부 지운다. 왼쪽 드래그
+// 채우기와 마찬가지로 무거운 전체 재계산(_commitTimeline)은 mouseup에서
+// 한 번만 하고, 드래그 중엔 지워진 점만 DOM에서 바로 뗀다.
+document.addEventListener('mousemove', e => {
+  if (!_tlErase) return;
+  const lane = document.querySelector(`.tl-lane[data-drum-id="${_tlErase.drumId}"]`);
+  if (!lane) { _tlErase = null; return; }
+  const rect    = lane.getBoundingClientRect();
+  const curBeat = (e.clientX - rect.left) / PX_PER_BEAT + 1;
+  const lo = Math.min(_tlErase.startBeat, curBeat) - 0.05;
+  const hi = Math.max(_tlErase.startBeat, curBeat) + 0.05;
+
+  const toRemove = timelineEvents.filter(ev => ev.drumId === _tlErase.drumId && ev.beat >= lo && ev.beat <= hi);
+  if (!toRemove.length) return;
+  _tlEraseOccurred = true;
+  toRemove.forEach(evt => {
+    document.querySelector(`.tl-lane[data-drum-id="${evt.drumId}"] .tl-hit[data-key="${evt.drumId}_${evt.beat}"]`)?.remove();
+  });
+  const removeSet = new Set(toRemove);
+  timelineEvents = timelineEvents.filter(ev => !removeSet.has(ev));
+  _tlDragDirty = true;   // 무거운 재계산·저장은 mouseup에서 한 번만
+});
+
+document.addEventListener('mouseup', () => {
+  if (_tlDrag && _tlDragOccurred) _tlDragSuppressClickUntil = performance.now() + 300;
+  if (_tlErase && _tlEraseOccurred) _tlDragSuppressClickUntil = performance.now() + 300;
+  _tlDrag = null;
+  _tlDragActive = false;
+  _tlDragOccurred = false;
+  _tlErase = null;
+  _tlEraseOccurred = false;
+  if (_tlDragDirty) { _tlDragDirty = false; _commitTimeline(); }   // 드래그 중 미룬 전체 재빌드·키프레임 계산을 한 번만
+});
 
 // 노트 클릭 시 현재 선택된 defaultVel로 즉시 적용
 function applyVel(drumId, beat) {
@@ -3434,6 +3836,11 @@ function renderDrumList() {
     <option value="L" ${drum.arm==='L'?'selected':''}>L</option>
     <option value="R" ${drum.arm==='R'?'selected':''}>R</option>
   </select>`}
+  ${isKick
+    ? `<span class="drum-reach-badge"></span>`
+    : `<span class="drum-reach-badge" title="이 위치에서 왼팔/오른팔로 실제로 자연스럽게 닿는지">
+    <span class="reach-l ${drum._reachL === false ? 'bad' : 'ok'}">L</span><span class="reach-r ${drum._reachR === false ? 'bad' : 'ok'}">R</span>
+  </span>`}
   <input class="drum-pos-inp" type="number" step="0.01" title="X (앞)" value="${drum.pos.x.toFixed(2)}"
     onchange="updateDrumPos('${drum.id}','x',+this.value)">
   <input class="drum-pos-inp" type="number" step="0.01" title="Y (좌우)" value="${drum.pos.y.toFixed(2)}"
@@ -3467,8 +3874,8 @@ window.updateDrumProp = function (id, prop, val) {
     else if (drum.arm !== 'L' && drum.arm !== 'R') drum.arm = drum.pos.y >= 0 ? 'L' : 'R';
   }
   saveDrumKit();
-  renderDrumList();
   rebuildDrumSpheres();
+  renderDrumList();
   renderTimeline();
 };
 
@@ -3480,7 +3887,7 @@ window.updateDrumPos = function (id, axis, val) {
   const grp = drumGroups[id];
   if (grp) grp.position.set(drum.pos.x, drum.pos.y, drum.pos.z);
 
-  _updateDrumReachVisual(drum);   // 전체 재렌더 없이 도달 불가 시 드럼 색만 갱신
+  _updateDrumReachVisual(drum, true);   // 전체 재렌더 없이 도달 불가 시 드럼 색만 갱신
 
   // 소수점 2자리로 표시 정규화
   const item = document.querySelector(`.drum-row[data-id="${id}"]`);
@@ -3497,8 +3904,8 @@ window.addDrum = function () {
   const id = 'd' + nextDrumId++;
   drumKit.push({ id, name:`드럼 ${nextDrumId}`, type:'snare', arm:'L', pos:{x:0.50, y:0.20, z:0.46} });
   saveDrumKit();
-  renderDrumList();
   rebuildDrumSpheres();
+  renderDrumList();
   renderTimeline();
 };
 
@@ -3506,8 +3913,8 @@ window.deleteDrum = function (id) {
   drumKit         = drumKit.filter(d => d.id !== id);
   timelineEvents  = timelineEvents.filter(e => e.drumId !== id);
   saveDrumKit();
-  renderDrumList();
   rebuildDrumSpheres();
+  renderDrumList();
   renderTimeline();
 };
 
@@ -3614,10 +4021,10 @@ window.addEventListener('resize', () => renderTimeline());
   });
 });
 updateFK({ ...NEUTRAL });
-renderDrumList();
 renderPresetDropdown();
 renderSkinPresets();
 rebuildDrumSpheres();
+renderDrumList();
 loadSettings();   // BPM·박자·마디·체크박스·스트로크 오프셋 복원
 loadTimeline();   // 타임라인 이벤트 복원
 renderTimeline();
