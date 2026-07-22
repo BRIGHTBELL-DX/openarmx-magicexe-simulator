@@ -1129,7 +1129,25 @@ function buildKeyframes() {
           // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 남으면 그 사이는
           // peak 자세로 숨쉬듯 대기 — 안 넣으면 peak와 raiseB 두 점만으로
           // 보간되어 그 구간 내내 서서히 움직이는 것처럼 보인다.
-          if (raiseBT > peakT) addBreathingHold(poseMap, peak, peakT, raiseBT, sideKeys);
+          //
+          // 다만 hover 홀드가 raiseB 바로 앞까지 못박혀 있지 않으면(과거엔
+          // addBreathingHold가 raiseBT-0.63s 지점까지만 점을 채우고 그 뒤론
+          // 아무 점도 없어서) catmull-rom이 마지막 숨쉬기 점부터 raiseB까지
+          // 최대 ~1.5초 구간을 통째로 부드럽게 보간해, J1~J6 여러 관절이
+          // 한꺼번에 아주 천천히 움직이는 게 보였다 — 사용자 피드백: "타격
+          // 이라기보다 살짝 건드리는 느낌", 하이햇 1박 정도의 속도를 원함.
+          // hover 자세를 raiseB 직전 정확히 1박(DESCENT_DUR)까지는 못박아
+          // 고정해 두면, "내려치는" 움직임 전체가 그 1박 구간 안에서만
+          // 시작되어 훨씬 더 결단력 있게 보인다(간격이 좁아 그 전에 이미
+          // raiseB에 다다르는 경우는 Math.max로 자동 축소돼 기존과 동일).
+          const DESCENT_DUR    = beatDur;
+          const descentStartT  = parseFloat(Math.max(peakT, raiseBT - DESCENT_DUR).toFixed(3));
+          if (descentStartT > peakT) {
+            const midT = parseFloat(((peakT + descentStartT) / 2).toFixed(3));
+            if (midT > peakT && midT < descentStartT) addPose(poseMap, midT, peak, sideKeys);
+            addBreathingHold(poseMap, peak, peakT, descentStartT, sideKeys);
+            addPose(poseMap, descentStartT, peak, sideKeys);
+          }
         }
 
         if (raiseLead > 0.03 && raiseBT > peakT) {
