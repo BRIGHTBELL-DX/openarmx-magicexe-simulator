@@ -2902,16 +2902,41 @@ window.loadAudioFile = function (input) {
 
 // 이 도구는 MAGIC.EXE 한 곡 전용이라, 페이지 로드시 곡을 자동으로 재생
 // 트랙에 로드한다 — "🎵 음악 로드"로 다른 파일을 올리면 그걸로 교체 가능.
-async function _autoLoadDefaultSong() {
+// 같은 타임라인 기준으로 믹스/드럼만/노래만 3가지 버전이 있어 BGM
+// 드롭다운으로 바로 전환할 수 있다("끄기"는 무음 애니메이션 전용).
+const BGM_TRACKS = {
+  mastering: { file: 'assets/magicexe_mastering.mp3', label: 'MAGIC.EXE (Mastering)' },
+  drums:     { file: 'assets/magicexe_drums.mp3',     label: 'MAGIC.EXE (Drums)' },
+  nodrum:    { file: 'assets/magicexe_nodrum.mp3',    label: 'MAGIC.EXE (No Drum)' },
+};
+const _BGM_CHOICE_STORE = 'openarmx_bgm_choice_v1';
+
+window.setBgmTrack = async function (choice, { silent = false } = {}) {
+  const sel = document.getElementById('bgm-sel');
+  if (sel && sel.value !== choice) sel.value = choice;
+  try { localStorage.setItem(_BGM_CHOICE_STORE, choice); } catch (e) {}
+
+  if (choice === 'off') {
+    _stopAudio();
+    _audioBuf = null;
+    const nameEl = document.getElementById('audio-name');
+    if (nameEl) nameEl.textContent = '(BGM 끄기)';
+    if (!silent) setStatus('BGM 꺼짐 — 소리 없이 애니메이션만 재생됩니다');
+    return;
+  }
+
+  const track = BGM_TRACKS[choice];
+  if (!track) return;
   try {
     if (!_audioCtx) _audioCtx = new AudioContext();
-    const res = await fetch('assets/magicexe_mastering.mp3');
+    if (!silent) setStatus(`음악 로드 중: ${track.label}...`);
+    const res = await fetch(track.file);
     const buf = await res.arrayBuffer();
     _audioBuf = await _audioCtx.decodeAudioData(buf);
     const nameEl = document.getElementById('audio-name');
-    if (nameEl) nameEl.textContent = 'MAGIC.EXE (Mastering)';
+    if (nameEl) nameEl.textContent = track.label;
 
-    // 곡이 고정 1개이므로, 타임라인(마디 수)이 곡 전체 길이를 항상
+    // 곡이 고정 길이이므로, 타임라인(마디 수)이 곡 전체 길이를 항상
     // 덮도록 자동으로 맞춘다 — 기존 마디 수가 이미 곡보다 길면 그대로 둔다.
     const barDur     = (60 / bpm) * beatsPerBar;
     const neededBars = Math.ceil(_audioBuf.duration / barDur) + 1; // 여유 1마디
@@ -2924,10 +2949,21 @@ async function _autoLoadDefaultSong() {
       saveSettings();
     }
 
-    setStatus(`곡 자동 로드: MAGIC.EXE (Mastering) (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
+    setStatus(`음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
+    // 재생 중에 트랙을 바꾼 경우 새 버퍼로 이어서 재생되도록 다시 시작한다.
+    if (isPlaying) _playAudio(pauseOffset);
   } catch (err) {
-    setStatus('기본 곡 자동 로드 실패: ' + err.message);
+    setStatus(`${track.label} 로드 실패: ` + err.message);
   }
+};
+
+async function _autoLoadDefaultSong() {
+  let choice = 'mastering';
+  try { choice = localStorage.getItem(_BGM_CHOICE_STORE) || 'mastering'; } catch (e) {}
+  await window.setBgmTrack(choice, { silent: true });
+  if (choice === 'off') { setStatus('BGM 꺼짐 (이전 선택 복원) — 소리 없이 애니메이션만 재생됩니다'); return; }
+  const track = BGM_TRACKS[choice] || BGM_TRACKS.mastering;
+  setStatus(`곡 자동 로드: ${track.label} (${_audioBuf?.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
 }
 
 // ═══════════════════════════════════════════════════════════════
