@@ -2771,6 +2771,7 @@ function _seekFromRulerClick(e) {
 }
 document.getElementById('tl-ruler-sec').addEventListener('click', _seekFromRulerClick);
 document.getElementById('tl-ruler').addEventListener('click', _seekFromRulerClick);
+document.getElementById('tl-waveform').addEventListener('click', _seekFromRulerClick);
 
 // 정지/일시정지 상태에서 편집(강도 변경·스트로크 튜닝 등) 직후 현재 위치의
 // 포즈를 즉시 다시 그린다. 재생 중엔 animate() 루프가 매 프레임 갱신하므로
@@ -2882,6 +2883,12 @@ animate();
 // ═══════════════════════════════════════════════════════════════
 //  오디오 (Web Audio API)
 // ═══════════════════════════════════════════════════════════════
+// 파형 캐시 무효화용 세대 카운터 — _audioBuf가 바뀔 때마다 늘린다. 버퍼
+// 길이(샘플 수)만으로 캐시 키를 잡으면, 예를 들어 Mastering과 Drums처럼
+// 우연히 파일 크기(=샘플 수)가 완전히 같은 두 트랙 사이를 전환할 때 내용이
+// 다른데도 "안 바뀐 것"으로 오판해 파형이 갱신되지 않는 문제가 있다.
+let _audioGen = 0;
+
 window.loadAudioFile = function (input) {
   const file = input.files[0];
   if (!file) return;
@@ -2890,9 +2897,11 @@ window.loadAudioFile = function (input) {
   reader.onload = async e => {
     try {
       _audioBuf = await _audioCtx.decodeAudioData(e.target.result.slice(0));
+      _audioGen++;
       const nameEl = document.getElementById('audio-name');
       if (nameEl) nameEl.textContent = file.name;
       setStatus(`음악 로드: ${file.name} (${_audioBuf.duration.toFixed(1)}s)`);
+      renderTimeline();
     } catch (err) {
       setStatus('오디오 디코드 실패: ' + err.message);
     }
@@ -2919,9 +2928,11 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
   if (choice === 'off') {
     _stopAudio();
     _audioBuf = null;
+    _audioGen++;
     const nameEl = document.getElementById('audio-name');
     if (nameEl) nameEl.textContent = '(BGM 끄기)';
     if (!silent) setStatus('BGM 꺼짐 — 소리 없이 애니메이션만 재생됩니다');
+    renderTimeline();   // 파형도 비운다
     return;
   }
 
@@ -2933,6 +2944,7 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     const res = await fetch(track.file);
     const buf = await res.arrayBuffer();
     _audioBuf = await _audioCtx.decodeAudioData(buf);
+    _audioGen++;
     const nameEl = document.getElementById('audio-name');
     if (nameEl) nameEl.textContent = track.label;
 
@@ -2944,10 +2956,10 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
       totalBars = neededBars;
       const barsEl = document.getElementById('bars-inp');
       if (barsEl) barsEl.value = totalBars;
-      renderTimeline();
       updateTLInfo();
       saveSettings();
     }
+    renderTimeline();   // 마디 수가 그대로여도 새 오디오 버퍼로 파형은 다시 그려야 한다
 
     setStatus(`음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
     // 재생 중에 트랙을 바꾼 경우 새 버퍼로 이어서 재생되도록 다시 시작한다.
@@ -3479,10 +3491,80 @@ function renderTimeline() {
     lanesEl.appendChild(lane);
   });
 
-  const ph = document.createElement('div');
-  ph.id = 'tl-playhead';
-  lanesEl.appendChild(ph);
+  // 재생헤드는 #tl-lanes가 아니라 #tl-scroll에 붙여서 위쪽 파형·눈금 행까지
+  // 세로선이 관통해 지나가게 한다(파형 위에서도 재생 위치가 보이도록).
+  // #tl-lanes와 달리 #tl-scroll은 매번 비우지 않으므로, 이미 있으면 재사용한다.
+  let ph = document.getElementById('tl-playhead');
+  if (!ph) {
+    ph = document.createElement('div');
+    ph.id = 'tl-playhead';
+    document.getElementById('tl-scroll').appendChild(ph);
+  }
   _updatePlayhead(pauseOffset);
+
+  _renderWaveform(totalW);
+}
+
+// ── 재생 음악 파형 ───────────────────────────────────────────
+// x축을 초 눈금·비트 그리드와 완전히 같은 척도(픽셀/초 = PX_PER_BEAT*bpm/60)로
+// 그린다 — 오디오 자체의 시간은 고정이므로, BPM/박자가 실제 곡과 안 맞으면
+// 곡이 진행될수록 파형의 킥·스네어 피크가 그리드에서 점점 벗어나 보인다.
+// 반대로 잘 맞으면 곡 끝까지 파형 피크와 그리드가 나란히 간다 — 이 어긋남
+// 여부로 BPM을 눈으로 맞춰볼 수 있게 하는 게 목적이라, 오디오 자체 재생
+// 시간이 아니라 반드시 이 그리드 척도를 그대로 써야 한다.
+let _wfCacheKey = null;
+function _renderWaveform(totalW) {
+  const canvas = document.getElementById('tl-waveform');
+  if (!canvas) return;
+  const cssH = 48;
+  const introOff = _getAudioTimeOffset();
+  const key = `${_audioGen}|${bpm}|${Math.round(totalW)}|${introOff}`;
+  if (key === _wfCacheKey) return;   // 편집 등으로 renderTimeline만 재호출된 것 — 파형과 무관하면 재계산 생략
+  _wfCacheKey = key;
+
+  const dpr  = Math.min(2, window.devicePixelRatio || 1);
+  canvas.style.width = totalW + 'px';
+  const pxW = Math.max(1, Math.round(totalW * dpr));
+  const pxH = Math.round(cssH * dpr);
+  if (canvas.width  !== pxW) canvas.width  = pxW;
+  if (canvas.height !== pxH) canvas.height = pxH;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, totalW, cssH);
+
+  const mid = cssH / 2;
+  ctx.strokeStyle = '#22224a';
+  ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(totalW, mid); ctx.stroke();
+
+  if (!_audioBuf) return;   // BGM 꺼짐/로딩 전엔 중앙선만 남기고 빈 채로 둔다
+
+  const pxPerSecond = PX_PER_BEAT * bpm / 60;
+  const sr  = _audioBuf.sampleRate;
+  const ch0 = _audioBuf.getChannelData(0);
+  const ch1 = _audioBuf.numberOfChannels > 1 ? _audioBuf.getChannelData(1) : null;
+  const n   = ch0.length;
+
+  ctx.fillStyle = '#3a7ae0';
+  ctx.beginPath();
+  const wCols = Math.min(Math.ceil(totalW), 20000);   // 극단적으로 넓어져도 상한
+  for (let px = 0; px < wCols; px++) {
+    const aT0 = px / pxPerSecond - introOff;
+    const aT1 = (px + 1) / pxPerSecond - introOff;
+    if (aT1 < 0 || aT0 > _audioBuf.duration) continue;
+    const s0 = Math.max(0, Math.floor(aT0 * sr));
+    const s1 = Math.min(n, Math.max(s0 + 1, Math.ceil(aT1 * sr)));
+    let mn = 1, mx = -1;
+    for (let s = s0; s < s1; s++) {
+      const v = ch1 ? (ch0[s] + ch1[s]) * 0.5 : ch0[s];
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    if (mx < mn) continue;
+    const y0 = mid - mx * mid * 0.9;
+    const y1 = mid - mn * mid * 0.9;
+    ctx.rect(px, y0, 1, Math.max(1, y1 - y0));
+  }
+  ctx.fill();
 }
 
 // 이벤트가 실제로 타격하는 팔 — evt.arm(수동 오버라이드)이 있으면 그걸,
