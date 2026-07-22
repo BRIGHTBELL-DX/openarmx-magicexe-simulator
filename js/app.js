@@ -1172,12 +1172,21 @@ function buildKeyframes() {
           // 한꺼번에 아주 천천히 움직이는 게 보였다 — 사용자 피드백: "타격
           // 이라기보다 살짝 건드리는 느낌".
           // hover 자세를 raiseB 직전 못박아 두되, 팔 이동(DESCENT_DUR) +
-          // 마지막 손목 스냅(raiseLead)을 합친 총 "내려치는" 시간이 하이햇
-          // 타격 간격(beatDur, 1박) 정도가 되도록 잡는다 — 실측(7드럼 전체
-          // YAML 내보내기 속도 확인) 결과 가장 빠듯한 경우도 관절 속도
-          // 한계의 79%까지만 써서 여유 있게 안전하다. 간격이 좁아 그 전에
-          // 이미 raiseB에 다다르는 경우는 Math.max로 자동 축소돼 기존과 동일.
-          const DESCENT_DUR    = Math.max(0.03, beatDur - raiseLead);
+          // 마지막 손목 스냅(raiseLead)을 합친 총 "내려치는" 시간을 정한다.
+          //
+          // ★ 튜닝 파라미터 — DESCENT_FACTOR (현재 0.85, 기본/롤백값 1.0) ★
+          // 1.0 = 총 시간이 정확히 1박(하이햇 타격 간격) — 7드럼 전체 YAML
+          //       내보내기 실측 기준 가장 빠듯한 관절(크래쉬 손목)도 속도
+          //       한계의 79%만 사용, 안전 마진 21%.
+          // 0.85 = 총 시간을 약 9% 더 단축("최상단에 더 오래 머물다 짧고
+          //       굵게 내려치는" 느낌 강화). 138BPM 7드럼 전체 재실측 결과
+          //       가장 빠듯한 관절(크래쉬 손목) 88.7% 사용, 안전 마진 11.3%.
+          // ⚠ 이 값을 더 낮추면(예: 0.5) 관절 속도 한계에 클램프가 걸려
+          //   실제 로봇이 스케줄보다 늦게 도착하는 역효과가 남 — 138BPM
+          //   실측 시 0.5는 100%(클램프)까지 찍혀 위험 확인됨. 되돌릴 땐
+          //   숫자만 1.0으로 바꾸면 됨(2025-07-23 튜닝, 이전: 항상 1.0).
+          const DESCENT_FACTOR = 0.85;
+          const DESCENT_DUR    = Math.max(0.03, (beatDur - raiseLead) * DESCENT_FACTOR);
           const descentStartT  = parseFloat(Math.max(peakT, raiseBT - DESCENT_DUR).toFixed(3));
           if (descentStartT > peakT) {
             const midT = parseFloat(((peakT + descentStartT) / 2).toFixed(3));

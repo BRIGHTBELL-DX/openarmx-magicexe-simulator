@@ -7,6 +7,13 @@
 <link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
+<!--
+  튜닝 변경 기록 (롤백 참고용)
+  2025-07-23: 타격 직전 "내려치는" 시간을 1박(DESCENT_FACTOR=1.0)에서
+  0.85박으로 단축 — js/app.js의 buildKeyframes() 안, "DESCENT_FACTOR"로
+  검색하면 나옴. 138BPM 7드럼 전체 실측 기준 가장 빠듯한 관절(크래쉬
+  손목) 88.7% 사용(안전 마진 11.3%). 되돌리려면 그 상수를 1.0으로.
+-->
 
 <!-- ══ 헤더 ══ -->
 <div id="header">
@@ -308,6 +315,6 @@
 }
 </script>
 <script src="js/intro_outro_presets.js?v=13"></script>
-<script type="module" src="js/app.js?v=78"></script>
+<script type="module" src="js/app.js?v=79"></script>
 </body>
 </html>
