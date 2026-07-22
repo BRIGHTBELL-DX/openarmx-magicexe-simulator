@@ -3561,6 +3561,7 @@ function renderTimeline() {
   _updatePlayhead(pauseOffset);
 
   _renderWaveform(totalW);
+  _renderOnsetLines(totalW);
 }
 
 // ── 재생 음악 파형 ───────────────────────────────────────────
@@ -3626,6 +3627,108 @@ function _renderWaveform(totalW) {
     ctx.rect(px, y0, 1, Math.max(1, y1 - y0));
   }
   ctx.fill();
+}
+
+// ── 온셋(소리가 갑자기 튀는 지점) 자동 감지 + 점선 표시 ──────────
+// 목적: 아직 BPM/박자가 곡과 정확히 안 맞을 때, 실제 소리가 튀는 순간을
+// 점선으로 찍어두면 "이 점선에 하이햇/스네어 점이 정확히 걸리는가"로
+// 눈으로 확인하며 비트를 맞출 수 있다. 알고리즘은 프레임별 에너지의
+// 변화량(스펙트럴 플럭스 대용)이 주변 구간 평균보다 확 튀는 지점을
+// 국소 최댓값으로 잡는 단순한 온셋 검출 — 리듬 게임/DAW급 정밀도는
+// 아니지만, 사람이 듣기에 "확 튀는" 지점은 충분히 잘 잡는다.
+function _detectOnsets(buf) {
+  const sr  = buf.sampleRate;
+  const ch0 = buf.getChannelData(0);
+  const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
+  const hop = 512;
+  const n   = ch0.length;
+  const nFrames = Math.floor(n / hop);
+  const env = new Float32Array(nFrames);
+  for (let i = 0; i < nFrames; i++) {
+    let s = 0;
+    const st = i * hop;
+    for (let j = 0; j < hop; j++) {
+      const v = ch1 ? (ch0[st + j] + ch1[st + j]) * 0.5 : ch0[st + j];
+      s += v * v;
+    }
+    env[i] = Math.sqrt(s / hop);
+  }
+  const flux = new Float32Array(nFrames);
+  for (let i = 1; i < nFrames; i++) flux[i] = Math.max(0, env[i] - env[i - 1]);
+
+  // 적응형 임계값: 주변 ~0.5초 구간 평균 대비 확실히 튀는 지점만, 국소
+  // 최댓값에서, 최소 간격(60ms) 이상 벌어진 것만 온셋으로 채택 — 안 그러면
+  // 진짜 타격 하나가 여러 개의 인접한 프레임으로 겹쳐 찍힌다.
+  const winFrames    = Math.round(0.5 * sr / hop);
+  const minGapFrames = Math.round(0.06 * sr / hop);
+  const onsets = [];
+  let lastOnsetFrame = -Infinity;
+  for (let i = 2; i < nFrames - 2; i++) {
+    if (i - lastOnsetFrame <= minGapFrames) continue;
+    if (!(flux[i] >= flux[i - 1] && flux[i] >= flux[i + 1])) continue;   // 국소 최댓값만
+    const lo = Math.max(0, i - winFrames), hi = Math.min(nFrames, i + winFrames);
+    let sum = 0;
+    for (let k = lo; k < hi; k++) sum += flux[k];
+    const mean = sum / (hi - lo);
+    if (flux[i] > mean * 1.8 + 0.006) {
+      onsets.push(i * hop / sr);
+      lastOnsetFrame = i;
+    }
+  }
+  return onsets;
+}
+
+let _onsetTimes    = null;   // 오디오 자체에서 뽑은 온셋 시각(초) — bpm/그리드와 무관, audioGen에만 의존
+let _onsetForGen   = -1;
+let _onsetLinesKey = null;
+function _renderOnsetLines(totalW) {
+  const canvas = document.getElementById('tl-onset-lines');
+  if (!canvas) return;
+  const on = document.getElementById('chk-onset-lines')?.checked ?? true;
+  if (!on || !_audioBuf) {
+    canvas.width = canvas.height = 0;
+    _onsetLinesKey = null;
+    return;
+  }
+  if (_onsetForGen !== _audioGen) {
+    _onsetTimes  = _detectOnsets(_audioBuf);
+    _onsetForGen = _audioGen;
+  }
+
+  // canvas는 대체 요소라 top:0만으로는 늘어나지 않으므로 height를 명시
+  // 지정해야 한다. #tl-scroll.scrollHeight는 콘텐츠가 짧으면(드럼이 적어
+  // 레인 전체 높이가 flex가 할당한 영역보다 작을 때) 실제 콘텐츠 길이가
+  // 아니라 그 할당된 영역 높이를 반환해버려(레인 아래로 삐져나옴) 부정확
+  // 하다 — 대신 "파형 상단"과 "마지막 레인 하단" 두 실제 요소 사이의
+  // 거리를 직접 잰다.
+  const waveTop    = document.getElementById('tl-waveform')?.getBoundingClientRect().top ?? 0;
+  const lanesBottom = document.getElementById('tl-lanes')?.getBoundingClientRect().bottom ?? waveTop;
+  const cssH = Math.max(1, lanesBottom - waveTop);
+  canvas.style.width  = totalW + 'px';
+  canvas.style.height = cssH + 'px';
+  const key  = `${_audioGen}|${bpm}|${Math.round(totalW)}|${Math.round(cssH)}`;
+  if (key === _onsetLinesKey) return;
+  _onsetLinesKey = key;
+
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width  = Math.max(1, Math.round(totalW * dpr));
+  canvas.height = Math.max(1, Math.round(cssH * dpr));
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, totalW, cssH);
+
+  const pxPerSecond = PX_PER_BEAT * bpm / 60;
+  ctx.strokeStyle = 'rgba(255,160,0,0.55)';
+  ctx.lineWidth   = 1;
+  ctx.setLineDash([4, 4]);
+  _onsetTimes.forEach(t => {
+    const x = t * pxPerSecond;
+    if (x < 0 || x > totalW) return;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x) + 0.5, 0);
+    ctx.lineTo(Math.round(x) + 0.5, cssH);
+    ctx.stroke();
+  });
 }
 
 // 이벤트가 실제로 타격하는 팔 — evt.arm(수동 오버라이드)이 있으면 그걸,
@@ -4292,6 +4395,7 @@ document.getElementById('bars-inp').addEventListener('change', () => {
   renderTimeline(); updateTLInfo(); saveSettings();
 });
 document.getElementById('grid-sel').addEventListener('change', () => renderTimeline());
+document.getElementById('chk-onset-lines').addEventListener('change', () => renderTimeline());
 
 // ═══════════════════════════════════════════════════════════════
 //  유틸

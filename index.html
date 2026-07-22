@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenArmX MAGIC.EXE 드럼 타임라인</title>
-<link rel="stylesheet" href="css/style.css?v=9">
+<link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
 
@@ -269,12 +269,16 @@
         <button id="vel-mode-hard"   class="vel-mode-btn" onclick="setDefaultVel('hard')">강</button>
       </div>
       <button class="btn-sm" onclick="clearTimeline()">🗑 초기화</button>
+      <label title="파형에서 소리가 갑자기 튀는 지점(온셋)을 자동 감지해 타임라인 전체를 관통하는 점선으로 표시 — 이 선에 비트가 정확히 걸리는지 보면서 박자를 맞출 수 있다">
+        <input type="checkbox" id="chk-onset-lines" checked> 온셋 라인
+      </label>
     </div>
   </div>
   <div id="timeline">
     <div id="tl-lane-labels"></div>
     <div id="tl-scroll">
       <canvas id="tl-waveform" title="재생 음악 파형 — 실제 오디오 기준으로 그려지므로, BPM/박자가 맞으면 파형의 킥·스네어 피크가 아래 눈금/비트와 곡 끝까지 계속 맞아떨어진다. 뒤로 갈수록 어긋나 보이면 BPM이 실제 곡과 안 맞는다는 뜻."></canvas>
+      <canvas id="tl-onset-lines"></canvas>
       <div id="tl-ruler-sec"></div>
       <div id="tl-ruler"></div>
       <div id="tl-lanes"></div>
@@ -303,6 +307,6 @@
 }
 </script>
 <script src="js/intro_outro_presets.js?v=13"></script>
-<script type="module" src="js/app.js?v=73"></script>
+<script type="module" src="js/app.js?v=77"></script>
 </body>
 </html>
