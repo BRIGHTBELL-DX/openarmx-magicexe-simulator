@@ -4098,10 +4098,18 @@ window.applyPattern = function () {
 };
 
 document.getElementById('bpm-inp').addEventListener('change', () => {
-  // 박자·마디 핸들러와 동일하게 전역 bpm을 즉시 커밋 — "적용" 없이 BPM만 바꿔도
-  // 재생·WAV·YAML이 올바른 템포를 쓰도록(이전엔 라벨만 바뀌고 bpm은 그대로였음)
+  // 박자·마디는 바꾸는 즉시 타임라인이 다시 그려지는데 BPM만 "적용"을 눌러야
+  // 반영돼 일관성이 없었다 — beatDur(=60/bpm)은 buildKeyframes의 beat→시간
+  // 변환 자체에 쓰이므로, 박자·마디와 달리 렌더링뿐 아니라 키프레임 전체
+  // 재계산(_playKFs)과 재생 길이(scrubber max)까지 같이 갱신해야 한다.
   bpm = parseInt(document.getElementById('bpm-inp').value) || 120;
-  updateTLInfo(); saveSettings();
+  renderTimeline();
+  _playKFs = buildFinalKeyframes();
+  _playDur = _playKFs.totalTime;
+  document.getElementById('scrubber').max = _playDur;
+  updateTLInfo();
+  saveSettings();
+  if (!isPlaying) renderFrame(pauseOffset);
 });
 
 // 스트로크 튜닝 슬라이더 공통 rebuild

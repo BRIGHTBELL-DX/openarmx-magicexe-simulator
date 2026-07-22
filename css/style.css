@@ -45,9 +45,24 @@ body {
 #header-controls {
   display: flex;
   align-items: center;
-  gap: 8px 10px;
+  gap: 8px 4px;
   flex-wrap: wrap;
   flex: 1;
+}
+/* 관련 컨트롤을 그룹으로 묶고, 그룹 사이에만 구분선을 둔다 — 창이 좁아
+   줄바꿈될 때도 구분선이 그룹에서 떨어져 혼자 남지 않는다(그룹 자체가
+   줄바꿈 단위이기 때문). */
+.hdr-group {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.hdr-group:first-child {
+  padding-left: 0;
+  border-left: none;
 }
 #header-controls label {
   display: flex;
@@ -65,6 +80,16 @@ body {
   padding: 3px 6px;
   font-size: 12px;
   width: 58px;
+}
+/* BGM 목록은 옵션 글자가 길어(예: "믹스 (Mastering)") 공용 58px폭이면 잘려
+   보인다 — 이 select만 내용에 맞게 넓힌다. */
+#header-controls select#bgm-sel { width: auto; min-width: 118px; }
+#audio-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
 }
 #header-controls button {
   background: #1a3a70;

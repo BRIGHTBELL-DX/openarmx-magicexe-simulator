@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenArmX MAGIC.EXE 드럼 타임라인</title>
-<link rel="stylesheet" href="css/style.css?v=6">
+<link rel="stylesheet" href="css/style.css?v=7">
 </head>
 <body>
 
@@ -12,37 +12,51 @@
 <div id="header">
   <div id="header-title">🥁 OpenArmX MAGIC.EXE 드럼 타임라인</div>
   <div id="header-controls">
-    <label>BPM <input id="bpm-inp" type="number" min="40" max="240" value="136" step="1"></label>
-    <label>박자 <select id="meter-sel">
-      <option value="4">4/4</option>
-      <option value="3">3/4</option>
-    </select></label>
-    <label>마디 <input id="bars-inp" type="number" min="1" max="400" value="8" step="1"></label>
-    <button id="apply-btn" onclick="applyPattern()">▶ 적용 &amp; 재생</button>
-    <button class="btn-validate" onclick="validatePattern()">✓ 검증</button>
-    <button class="btn-export" onclick="exportYAML()">📥 YAML 내보내기</button>
-    <button class="btn-export btn-export-audio" onclick="exportAudio()">🎵 비트 WAV 내보내기</button>
-    <button class="btn-export" onclick="exportProject()" title="드럼 키트 위치·타임라인 비트를 파일로 저장(JSON) — 나중에 그대로 불러올 수 있음">💾 프로젝트 저장</button>
-    <label class="audio-label" title="저장했던 프로젝트 파일(JSON)을 불러와 드럼 키트·타임라인을 그대로 복원합니다">
-      📂 프로젝트 불러오기
-      <input type="file" id="project-file" accept=".json,application/json" style="display:none" onchange="importProject(this)">
-    </label>
-    <label title="같은 타임라인 기준 3가지 BGM 버전 중 선택 — 끄기를 고르면 소리 없이 애니메이션만 재생됩니다">🎵 BGM
-      <select id="bgm-sel" onchange="setBgmTrack(this.value)">
-        <option value="mastering">믹스 (Mastering)</option>
-        <option value="drums">드럼만 (Drums)</option>
-        <option value="nodrum">노래만 (No Drum)</option>
-        <option value="off">끄기</option>
-      </select>
-    </label>
-    <label class="audio-label" title="MP3 / WAV / OGG 파일을 로드하면 재생 시 함께 흘러나옵니다 — 위 BGM 선택 대신 커스텀 파일을 쓰고 싶을 때">
-      🎵 음악 로드
-      <input type="file" id="audio-file" accept="audio/*" style="display:none" onchange="loadAudioFile(this)">
-    </label>
-    <span id="audio-name">파일 없음</span>
-    <button class="btn-sm" id="drum-panel-toggle-btn" onclick="toggleDrumPanel()" title="드럼 키트 구성 패널 열기/닫기">🥁 드럼 키트</button>
-    <button class="btn-sm" id="stroke-panel-toggle-btn" onclick="toggleStrokePanel()" title="스트로크 튜닝 패널 열기/닫기">🎯 스트로크</button>
-    <button class="btn-sm" id="video-panel-toggle-btn" onclick="toggleRefVideoPanel()" title="참고 영상 패널 열기/닫기">🎬 참고 영상</button>
+    <div class="hdr-group">
+      <label>BPM <input id="bpm-inp" type="number" min="40" max="240" value="136" step="1"></label>
+      <label>박자 <select id="meter-sel">
+        <option value="4">4/4</option>
+        <option value="3">3/4</option>
+      </select></label>
+      <label>마디 <input id="bars-inp" type="number" min="1" max="400" value="8" step="1"></label>
+    </div>
+
+    <div class="hdr-group">
+      <button id="apply-btn" onclick="applyPattern()">▶ 적용 &amp; 재생</button>
+      <button class="btn-validate" onclick="validatePattern()">✓ 검증</button>
+    </div>
+
+    <div class="hdr-group">
+      <button class="btn-export" onclick="exportYAML()">📥 YAML 내보내기</button>
+      <button class="btn-export btn-export-audio" onclick="exportAudio()">🎵 비트 WAV 내보내기</button>
+      <button class="btn-export" onclick="exportProject()" title="드럼 키트 위치·타임라인 비트를 파일로 저장(JSON) — 나중에 그대로 불러올 수 있음">💾 프로젝트 저장</button>
+      <label class="audio-label" title="저장했던 프로젝트 파일(JSON)을 불러와 드럼 키트·타임라인을 그대로 복원합니다">
+        📂 프로젝트 불러오기
+        <input type="file" id="project-file" accept=".json,application/json" style="display:none" onchange="importProject(this)">
+      </label>
+    </div>
+
+    <div class="hdr-group">
+      <label title="같은 타임라인 기준 3가지 BGM 버전 중 선택 — 끄기를 고르면 소리 없이 애니메이션만 재생됩니다">🎵 BGM
+        <select id="bgm-sel" onchange="setBgmTrack(this.value)">
+          <option value="mastering">믹스 (Mastering)</option>
+          <option value="drums">드럼만 (Drums)</option>
+          <option value="nodrum">노래만 (No Drum)</option>
+          <option value="off">끄기</option>
+        </select>
+      </label>
+      <label class="audio-label" title="MP3 / WAV / OGG 파일을 로드하면 재생 시 함께 흘러나옵니다 — 위 BGM 선택 대신 커스텀 파일을 쓰고 싶을 때">
+        🎵 음악 로드
+        <input type="file" id="audio-file" accept="audio/*" style="display:none" onchange="loadAudioFile(this)">
+      </label>
+      <span id="audio-name">파일 없음</span>
+    </div>
+
+    <div class="hdr-group">
+      <button class="btn-sm" id="drum-panel-toggle-btn" onclick="toggleDrumPanel()" title="드럼 키트 구성 패널 열기/닫기">🥁 드럼 키트</button>
+      <button class="btn-sm" id="stroke-panel-toggle-btn" onclick="toggleStrokePanel()" title="스트로크 튜닝 패널 열기/닫기">🎯 스트로크</button>
+      <button class="btn-sm" id="video-panel-toggle-btn" onclick="toggleRefVideoPanel()" title="참고 영상 패널 열기/닫기">🎬 참고 영상</button>
+    </div>
   </div>
 </div>
 
@@ -280,6 +294,6 @@
 }
 </script>
 <script src="js/intro_outro_presets.js?v=13"></script>
-<script type="module" src="js/app.js?v=62"></script>
+<script type="module" src="js/app.js?v=63"></script>
 </body>
 </html>
