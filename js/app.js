@@ -1082,8 +1082,18 @@ function buildKeyframes() {
         // 흐름을 유지한다 — 사용자 피드백: 간격이 넉넉할 때 peak로 대기하면
         // 쉬는 동안 계속 다음 타격 쪽으로 팔이 넘어가는 것처럼 보여 어색했음
         // (빠르게 스냅하는 하이햇 연타와 대비돼 유독 느릿해 보임).
+        //
+        // 단, 다음 타격이 "같은 드럼"이면(예: 느린 스네어 연타) 이 중립 자세로
+        // 스윙하지 않는다 — 여기서 peak는 사실상 그 드럼의 raise 자세(같은
+        // 드럼끼리 평균이라 raise와 거의 동일)라 이미 하이햇처럼 "그 드럼 바로
+        // 위에서 hover"하는 안전한 자세인데, 굳이 범용 정면 대기 자세(READY)로
+        // 크게 스윙했다가 되돌아오면 J1이 크게 움직이는 갑작스러운 동작이 되고
+        // 그 과정에서 몸통과 부딪히는 사례가 실측 확인됐다(R팔 J1이 -0.43까지
+        // 후인). 드럼이 바뀌는 공백에만(진짜 "다음 타격 쪽으로 미리 넘어가
+        // 보이는" 문제가 있는 경우에만) 중립 자세로 쉰다.
         const IDLE_GAP_THRESHOLD = preDur * 3;
-        const useNeutralHold = gap > IDLE_GAP_THRESHOLD;
+        const sameDrum = next.drum.id === drum.id;
+        const useNeutralHold = gap > IDLE_GAP_THRESHOLD && !sameDrum;
 
         addPose(poseMap, peakT, useNeutralHold ? preLift[arm] : peak, sideKeys);
 
