@@ -1135,12 +1135,14 @@ function buildKeyframes() {
           // 아무 점도 없어서) catmull-rom이 마지막 숨쉬기 점부터 raiseB까지
           // 최대 ~1.5초 구간을 통째로 부드럽게 보간해, J1~J6 여러 관절이
           // 한꺼번에 아주 천천히 움직이는 게 보였다 — 사용자 피드백: "타격
-          // 이라기보다 살짝 건드리는 느낌", 하이햇 1박 정도의 속도를 원함.
-          // hover 자세를 raiseB 직전 정확히 1박(DESCENT_DUR)까지는 못박아
-          // 고정해 두면, "내려치는" 움직임 전체가 그 1박 구간 안에서만
-          // 시작되어 훨씬 더 결단력 있게 보인다(간격이 좁아 그 전에 이미
-          // raiseB에 다다르는 경우는 Math.max로 자동 축소돼 기존과 동일).
-          const DESCENT_DUR    = beatDur;
+          // 이라기보다 살짝 건드리는 느낌".
+          // hover 자세를 raiseB 직전 못박아 두되, 팔 이동(DESCENT_DUR) +
+          // 마지막 손목 스냅(raiseLead)을 합친 총 "내려치는" 시간이 하이햇
+          // 타격 간격(beatDur, 1박) 정도가 되도록 잡는다 — 실측(7드럼 전체
+          // YAML 내보내기 속도 확인) 결과 가장 빠듯한 경우도 관절 속도
+          // 한계의 79%까지만 써서 여유 있게 안전하다. 간격이 좁아 그 전에
+          // 이미 raiseB에 다다르는 경우는 Math.max로 자동 축소돼 기존과 동일.
+          const DESCENT_DUR    = Math.max(0.03, beatDur - raiseLead);
           const descentStartT  = parseFloat(Math.max(peakT, raiseBT - DESCENT_DUR).toFixed(3));
           if (descentStartT > peakT) {
             const midT = parseFloat(((peakT + descentStartT) / 2).toFixed(3));
