@@ -234,6 +234,9 @@ body {
   transition: background .15s;
 }
 .btn-sm:hover { background: #243a70; }
+/* 재생바의 .pb-btn.on과 같은 "켜짐" 표시 — 헤더의 클릭음 온/오프 버튼처럼
+   .btn-sm에도 켜짐 상태를 시각적으로 구분해야 하는 토글 버튼이 있다. */
+.btn-sm.on { background: #1a4090; border-color: #3a60c0; color: #fff; }
 .preset-row {
   display: flex;
   align-items: center;

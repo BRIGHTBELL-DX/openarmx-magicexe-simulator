@@ -1999,8 +1999,13 @@ const _drumSounds = {
 
 window.toggleDrumSound = function () {
   _drumSoundOn = !_drumSoundOn;
-  const btn = document.getElementById('btn-sound');
-  if (btn) { btn.textContent = _drumSoundOn ? '🔊' : '🔇'; btn.classList.toggle('on', _drumSoundOn); }
+  // 재생바(#btn-sound)와 헤더(#btn-sound-hdr) 두 군데에 같은 스위치를
+  // 둬서(BGM 컨트롤 옆에도 있어야 눈에 띈다는 피드백) 어느 쪽을 눌러도
+  // 둘 다 같이 갱신되게 한다.
+  ['btn-sound', 'btn-sound-hdr'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) { btn.textContent = _drumSoundOn ? '🔊' : '🔇'; btn.classList.toggle('on', _drumSoundOn); }
+  });
 };
 
 function playDrumSound(drumType) {
