@@ -246,6 +246,8 @@ function saveSettings() {
       introStyleId: document.getElementById('intro-style-sel')?.value || 'spread',
       stickJ7Offset,
       contactBoostMax,
+      bgmVolume:       parseFloat(document.getElementById('bgm-volume')?.value) ?? 1,
+      drumClickVolume: parseFloat(document.getElementById('drum-click-volume')?.value) ?? 1,
     }));
   } catch(e) {}
 }
@@ -262,6 +264,18 @@ function loadSettings() {
     if (s.introStyleId != null) { const el = document.getElementById('intro-style-sel'); if (el) el.value = s.introStyleId; }
     if (s.stickJ7Offset   != null) { stickJ7Offset   = s.stickJ7Offset;   _setSliderPair('stick-j7-slider',   'stick-j7-val',   stickJ7Offset); }
     if (s.contactBoostMax != null) { contactBoostMax = s.contactBoostMax; _setSliderPair('contact-boost-slider', 'contact-boost-val', contactBoostMax); }
+    if (s.bgmVolume != null) {
+      const el = document.getElementById('bgm-volume');
+      if (el) el.value = s.bgmVolume;
+      const lbl = document.getElementById('bgm-volume-val');
+      if (lbl) lbl.textContent = Math.round(s.bgmVolume * 100) + '%';
+    }
+    if (s.drumClickVolume != null) {
+      const el = document.getElementById('drum-click-volume');
+      if (el) el.value = s.drumClickVolume;
+      const lbl = document.getElementById('drum-click-volume-val');
+      if (lbl) lbl.textContent = Math.round(s.drumClickVolume * 100) + '%';
+    }
     updateTLInfo();
   } catch(e) {}
 }
@@ -375,6 +389,27 @@ let _audioBuf  = null;
 let _audioSrc  = null;
 let _audioStartCtxT = 0;
 let _audioPlayOff   = 0;
+
+// BGM 음량 — _audioSrc를 destination에 바로 물리지 않고 이 게인 노드를
+// 거치게 해서 슬라이더로 조절한다. _audioCtx는 트랙을 바꿔도(setBgmTrack)
+// 그대로 재사용되므로 한 번만 만들면 된다.
+let _bgmGainNode = null;
+function _ensureBgmGain() {
+  if (_bgmGainNode) return _bgmGainNode;
+  if (!_audioCtx) return null;
+  _bgmGainNode = _audioCtx.createGain();
+  _bgmGainNode.gain.value = parseFloat(document.getElementById('bgm-volume')?.value) || 1;
+  _bgmGainNode.connect(_audioCtx.destination);
+  return _bgmGainNode;
+}
+window.setBgmVolume = function (val) {
+  const v = parseFloat(val) || 0;
+  const gain = _ensureBgmGain();
+  if (gain) gain.gain.value = v;
+  const lbl = document.getElementById('bgm-volume-val');
+  if (lbl) lbl.textContent = Math.round(v * 100) + '%';
+  saveSettings();
+};
 
 // ═══════════════════════════════════════════════════════════════
 //  중립 포즈
@@ -1763,15 +1798,30 @@ function updateJointHud(angles) {
 let _drumAudioCtx  = null;
 let _drumMasterBus = null;
 let _drumSoundOn   = true;
+let _drumGainNode  = null;
 
 function _getDrumCtx() {
   if (!_drumAudioCtx) {
     _drumAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    _drumMasterBus = _makeDrumBus(_drumAudioCtx);
+    const comp = _makeDrumBus(_drumAudioCtx);   // comp -> destination
+    // 슬라이더로 조절 가능한 음량 게인을 컴프레서 앞에 끼워 넣는다 — 이
+    // 라이브 클릭음 전용 체인에만 적용되고, WAV 내보내기용 오프라인
+    // 컨텍스트(_makeDrumBus를 따로 호출하는 쪽)는 항상 원래 음량 그대로다.
+    _drumGainNode = _drumAudioCtx.createGain();
+    _drumGainNode.gain.value = parseFloat(document.getElementById('drum-click-volume')?.value) || 1;
+    _drumGainNode.connect(comp);
+    _drumMasterBus = _drumGainNode;
   }
   if (_drumAudioCtx.state === 'suspended') _drumAudioCtx.resume();
   return _drumAudioCtx;
 }
+window.setDrumClickVolume = function (val) {
+  const v = parseFloat(val) || 0;
+  if (_drumGainNode) _drumGainNode.gain.value = v;
+  const lbl = document.getElementById('drum-click-volume-val');
+  if (lbl) lbl.textContent = Math.round(v * 100) + '%';
+  saveSettings();
+};
 // 여러 파셜/노이즈 레이어가 겹쳐도 뭉개지지 않도록 컴프레서를 하나 거쳐
 // destination으로 보낸다. 오프라인(WAV 내보내기) 컨텍스트는 매번 새로
 // 만들어지므로 그때그때 별도로 하나 만들어 쓴다(_drumSounds 쪽은 dest를
@@ -3159,7 +3209,7 @@ function _playAudio(timelineOffset) {
   _audioSrc = _audioCtx.createBufferSource();
   _audioSrc.buffer = _audioBuf;
   _audioSrc.playbackRate.value = _playbackSpeed;
-  _audioSrc.connect(_audioCtx.destination);
+  _audioSrc.connect(_ensureBgmGain());
   _audioPlayOff   = clamp(audioFilePos, 0, _audioBuf.duration);
   const realStartDelay = startDelay / _playbackSpeed;   // 배속으로 늘어난 인트로 대기 시간만큼 지연
   _audioStartCtxT = _audioCtx.currentTime + realStartDelay;

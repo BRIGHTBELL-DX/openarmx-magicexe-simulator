@@ -91,6 +91,16 @@ body {
   white-space: nowrap;
   color: var(--dim);
 }
+#header-controls input[type=range] {
+  width: 70px;
+  vertical-align: middle;
+}
+#bgm-volume-val, #drum-click-volume-val {
+  display: inline-block;
+  min-width: 34px;
+  color: var(--dim);
+  font-size: 11px;
+}
 #header-controls button {
   background: #1a3a70;
   border: 1px solid #2a5ab0;
