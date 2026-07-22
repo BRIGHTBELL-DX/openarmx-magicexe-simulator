@@ -3525,8 +3525,7 @@ function _renderWaveform(totalW) {
   const canvas = document.getElementById('tl-waveform');
   if (!canvas) return;
   const cssH = 48;
-  const introOff = _getAudioTimeOffset();
-  const key = `${_audioGen}|${bpm}|${Math.round(totalW)}|${introOff}`;
+  const key = `${_audioGen}|${bpm}|${Math.round(totalW)}`;
   if (key === _wfCacheKey) return;   // 편집 등으로 renderTimeline만 재호출된 것 — 파형과 무관하면 재계산 생략
   _wfCacheKey = key;
 
@@ -3556,8 +3555,12 @@ function _renderWaveform(totalW) {
   ctx.beginPath();
   const wCols = Math.min(Math.ceil(totalW), 20000);   // 극단적으로 넓어져도 상한
   for (let px = 0; px < wCols; px++) {
-    const aT0 = px / pxPerSecond - introOff;
-    const aT1 = (px + 1) / pxPerSecond - introOff;
+    // 그리드 x=0은 이미 "드럼 구간 시작"(재생헤드가 인트로 동안 x=0에
+    // 멈춰있다가 인트로가 끝나야 움직이기 시작하는 것과 같은 기준) 이므로,
+    // 오디오 파일 시간도 인트로 오프셋 없이 그대로 x=0에 맞춘다 — 오디오
+    // 자체는 인트로가 끝나는 순간부터 파일 처음(0초)이 재생되기 시작한다.
+    const aT0 = px / pxPerSecond;
+    const aT1 = (px + 1) / pxPerSecond;
     if (aT1 < 0 || aT0 > _audioBuf.duration) continue;
     const s0 = Math.max(0, Math.floor(aT0 * sr));
     const s1 = Math.min(n, Math.max(s0 + 1, Math.ceil(aT1 * sr)));
