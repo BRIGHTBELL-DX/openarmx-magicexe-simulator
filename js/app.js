@@ -238,7 +238,7 @@ const _TIMELINE_STORE = 'openarmx_timeline_v1';
 function saveSettings() {
   try {
     localStorage.setItem(_SETTINGS_STORE, JSON.stringify({
-      bpm:          parseInt(document.getElementById('bpm-inp')?.value)   || bpm,
+      bpm:          parseFloat(document.getElementById('bpm-inp')?.value) || bpm,
       beatsPerBar:  parseInt(document.getElementById('meter-sel')?.value) || beatsPerBar,
       totalBars:    parseInt(document.getElementById('bars-inp')?.value)  || totalBars,
       introChecked: document.getElementById('chk-intro')?.checked ?? true,
@@ -2151,7 +2151,15 @@ function rebuildDrumSpheres() {
     grp.add(base);
   });
 
-  drumKit.forEach(drum => _updateDrumReachVisual(drum, true));
+  // force=true(드래그 종료 등)로 도달성 배지를 갱신하면 드럼마다 양팔의
+  // _solveStickStrike(다중 시드 IK)를 캐시 없이 새로 도는데, 페이지를 처음
+  // 열 때는 _strikeSolveCache가 완전히 비어 있어 이 한 줄이 수 초~수십 초를
+  // 그대로 메인 스레드에서 막아버렸다(실측: 3드럼 기준 11.5초, 배포 사이트
+  // 기준 더 큰 지연) — 오디오 fetch·첫 렌더까지 전부 이 뒤에서 대기하게 돼
+  // "새로고침하면 로드가 엄청 늦다"는 증상의 원인이었다. setTimeout으로
+  // 한 틱 미뤄서 크리티컬 패스(첫 렌더·오디오 로드) 뒤에 돌게 한다 — 배지가
+  // 화면에 반영되는 시점만 살짝(체감 안 되는 수준) 늦어질 뿐, 정확도는 동일.
+  setTimeout(() => drumKit.forEach(drum => _updateDrumReachVisual(drum, true)), 0);
 }
 
 // 팔이 닿지 않는 위치로 옮겨졌을 때 드럼 헤드 색을 빨간색으로 바꿔 재생 없이도
@@ -4163,7 +4171,7 @@ window.deleteDrum = function (id) {
 //  패턴 적용
 // ═══════════════════════════════════════════════════════════════
 window.applyPattern = function () {
-  bpm         = parseInt(document.getElementById('bpm-inp').value)  || 120;
+  bpm         = parseFloat(document.getElementById('bpm-inp').value) || 120;
   beatsPerBar = parseInt(document.getElementById('meter-sel').value) || 4;
   totalBars   = parseInt(document.getElementById('bars-inp').value)  || 4;
 
@@ -4184,7 +4192,7 @@ document.getElementById('bpm-inp').addEventListener('change', () => {
   // 반영돼 일관성이 없었다 — beatDur(=60/bpm)은 buildKeyframes의 beat→시간
   // 변환 자체에 쓰이므로, 박자·마디와 달리 렌더링뿐 아니라 키프레임 전체
   // 재계산(_playKFs)과 재생 길이(scrubber max)까지 같이 갱신해야 한다.
-  bpm = parseInt(document.getElementById('bpm-inp').value) || 120;
+  bpm = parseFloat(document.getElementById('bpm-inp').value) || 120;
   renderTimeline();
   _playKFs = buildFinalKeyframes();
   _playDur = _playKFs.totalTime;
@@ -4241,7 +4249,7 @@ function setStatus(msg) {
 }
 
 function updateTLInfo() {
-  const b  = parseInt(document.getElementById('bpm-inp').value)    || bpm;
+  const b  = parseFloat(document.getElementById('bpm-inp').value)  || bpm;
   const bp = parseInt(document.getElementById('meter-sel').value)  || beatsPerBar;
   const tb = parseInt(document.getElementById('bars-inp').value)   || totalBars;
   const el = document.getElementById('tl-info');
@@ -4273,6 +4281,10 @@ window.addEventListener('resize', () => {
     const label = [inclIntro && '인트로', inclOutro && '아웃트로'].filter(Boolean).join('+');
     setStatus(`타임라인 갱신: ${label || '드럼 본편만'} (${_playDur.toFixed(1)}s)`);
     saveSettings();
+    // 인트로 on/off는 _getAudioTimeOffset()이 반환하는 값을 바꾸는데, 파형은
+    // 그 오프셋 기준으로 그려진다 — renderTimeline을 안 부르면 예전 인트로
+    // 설정 기준으로 그려진 파형이 그대로 남아 그리드와 어긋나 보인다.
+    renderTimeline();
   });
 });
 updateFK({ ...NEUTRAL });
