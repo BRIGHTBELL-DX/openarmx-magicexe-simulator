@@ -2480,13 +2480,19 @@ function createDrumIntroTimeline(firstRaisePose, firstStrikePose, preset, styleI
   // 진입 동작(사용자 지정 안무)이 거의 정지 상태였던 tail 구간을 잡아먹고
   // 0~3.3s로 늘어난 만큼, tail은 1.25s(2.75~4.00)→0.70s(3.30~4.00)로
   // 압축 — 첫 타격 시점(4.00s) 자체는 그대로 유지한다.
-  const tail = [
-    { time: 3.30, angles: firstRaisePose                     },  // 첫 드럼 방향으로 회전 + 코킹
-    { time: 3.45, angles: firstRaisePose                     },  // 홀드
-    { time: 3.60, angles: _breathePose(firstRaisePose, +0.04)},  // 숨 들이쉬기
-    { time: 3.80, angles: firstRaisePose                     },  // 숨 내쉬기 → 정지
-    { time: 4.00, angles: firstStrikePose                    },  // ▶ 손목 스냅으로 내려치기
+  //
+  // makeTail(shift) — xstrike만 진입을 더 느리게 하려고 앞쪽에 시간이
+  // 더 필요해서(2025-07-23), tail 시작을 shift만큼 뒤로(4.00s 쪽으로)
+  // 당겨 압축할 수 있게 파라미터화했다. spread/retreat는 shift=0(기존과
+  // 완전히 동일)이라 이미 오프라인 검증된 동작을 그대로 유지한다.
+  const makeTail = (shift = 0) => [
+    { time: 3.30 + shift, angles: firstRaisePose                     },  // 첫 드럼 방향으로 회전 + 코킹
+    { time: 3.45 + shift, angles: firstRaisePose                     },  // 홀드
+    { time: 3.60 + shift, angles: _breathePose(firstRaisePose, +0.04)},  // 숨 들이쉬기
+    { time: 3.80 + shift, angles: firstRaisePose                     },  // 숨 내쉬기 → 정지
+    { time: 4.00,         angles: firstStrikePose                    },  // ▶ 손목 스냅으로 내려치기(항상 4.00s 고정)
   ];
+  const tail = makeTail(0);
 
   if (styleId === 'retreat' && style.poseA && style.poseB) {
     const poseA = _arrToAngles(style.poseA);
@@ -2500,11 +2506,12 @@ function createDrumIntroTimeline(firstRaisePose, firstStrikePose, preset, styleI
   }
 
   if (styleId === 'xstrike' && style.crossPose) {
-    // 앞에 드럼이 있으므로 진입은 retreat 스타일(poseA/poseB)을 그대로
-    // 재사용 — armSpreadPose처럼 neutral→cross 직행이 드럼과 부딪힐 수 있음.
+    // 앞에 드럼이 있으므로 진입은 retreat과 비슷한 경로(entryPoseA/
+    // entryPoseB, xstrike 전용 — intro_outro_presets.js 참고)를 거친다 —
+    // armSpreadPose처럼 neutral→cross 직행이 드럼과 부딪힐 수 있음.
     const retreatStyle = (typeof INTRO_STYLES !== 'undefined' && INTRO_STYLES.retreat) || {};
-    const poseA = _arrToAngles(retreatStyle.poseA || style.crossPose);
-    const poseB = _arrToAngles(retreatStyle.poseB || style.crossPose);
+    const poseA = _arrToAngles(style.entryPoseA || retreatStyle.poseA || style.crossPose);
+    const poseB = _arrToAngles(style.entryPoseB || retreatStyle.poseB || style.crossPose);
     const cross = _arrToAngles(style.crossPose);
 
     // 스틱을 쥔 두 팔이 동시에 교차 자세로 들어가면 궤적이 겹칠 수 있어(서로
@@ -2520,12 +2527,33 @@ function createDrumIntroTimeline(firstRaisePose, firstStrikePose, preset, styleI
     const rightRaise  = { ...rightReady, R7: style.raiseR7 };
     const rightStrike = { ...rightReady, R7: style.strikeR7 };
 
-    // 타격 횟수 4회 — 진입(0~1.44s) 이후 남은 시간(1.44~3.12s)에 재코킹
-    // (0.30s)+스냅(0.12s) 사이클을 4번 반복해서 채운다. tail 시작(3.30s)
-    // 직전에 작게 여유(0.18s)를 남겨 firstRaisePose로의 전환이 급작스럽지
-    // 않게 한다.
-    const STRIKE_COUNT = 4;
-    const READY_TIME = 1.44, RAISE_DUR = 0.30, STRIKE_DUR = 0.12;
+    // 타격 횟수 3회 — 진입(0~1.74s) 이후 남은 시간에 재코킹(0.30s)+스냅
+    // (0.12s) 사이클을 3번 반복해서 채운다. 마지막 타격(3.00s) 이후
+    // tail 시작(3.30s)까지 0.30s 여유를 둬 firstRaisePose로의 전환이
+    // 급작스럽지 않게 한다.
+    //
+    // ★ 2025-07-23 튜닝 1차 — 진입 속도(0.48s→0.78s) ★
+    // 실물 오프라인 테스트에서 X자 타격 진입(neutral→poseA) 도중 토크가
+    // 풀리는 폴트 발생. retreat 스타일은 같은 poseA 값(당시 L1=0.90)에
+    // 1.20초에 걸쳐 도달해 문제없었는데, xstrike는 0.48초 만에(2.5배
+    // 빠르게) 도달해 오버슈트로 왼팔 joint1의 실제 한계(약 0.906rad)를
+    // 순간적으로 넘었을 가능성이 높다고 판단. 진입을 0.48s→0.78s로
+    // 늦추고(다른 진입 단계는 이전과 동일한 간격을 유지한 채 뒤로 밀림),
+    // poseA 각도 자체도 낮춤(intro_outro_presets.js의 entryPoseA 참고,
+    // L1 0.90→0.75).
+    //
+    // ★ 2025-07-23 튜닝 2차 — 타격 횟수 4→3, tail 원복 ★
+    // 1차 튜닝 때 진입 시간을 늘리려고 tail을 0.70s→0.50s로 압축
+    // (makeTail(0.20))했는데, 사용자 피드백: "대기자세 전환이 너무
+    // 급해 보인다". 타격 횟수를 4→3으로 줄이면 사이클 하나만큼(0.42s)
+    // 시간이 남아서, tail을 원래 길이(0.70s, makeTail(0))로 되돌리고도
+    // 마지막 타격~tail 시작 사이 여유가 오히려 0.08s→0.30s로 늘었다.
+    // ⚠ 롤백하려면: STRIKE_COUNT를 4로, makeTail(0)을 makeTail(0.20)으로.
+    //   진입 속도·각도(1차 튜닝)를 되돌리려면 시간표를 0.48/0.84/1.20/1.44,
+    //   entryPoseA/B 대신 retreatStyle.poseA/B로.
+    const ENTRY_A_T = 0.78, ENTRY_B_T = 1.14, ENTRY_CROSS_T = 1.50;
+    const STRIKE_COUNT = 3;
+    const READY_TIME = 1.74, RAISE_DUR = 0.30, STRIKE_DUR = 0.12;
     const strikeFrames = [];
     let t = READY_TIME;
     for (let i = 0; i < STRIKE_COUNT; i++) {
@@ -2536,13 +2564,13 @@ function createDrumIntroTimeline(firstRaisePose, firstStrikePose, preset, styleI
     }
 
     return [
-      { time: 0.00,        angles: nu          },
-      { time: 0.48,        angles: poseA       },  // 후인 + 손목 들기(공통 진입)
-      { time: 0.84,        angles: poseB       },  // J1 복귀
-      { time: 1.20,        angles: leftInCross },  // 왼팔 먼저 교차 자세로 진입 + 고정(이후 계속 고정)
-      { time: READY_TIME,  angles: rightReady  },  // 오른팔이 앞을 가로질러 들어가 준비 자세(아직 타격 아님)
+      { time: 0.00,           angles: nu          },
+      { time: ENTRY_A_T,      angles: poseA       },  // 후인 + 손목 들기(공통 진입) — 완화된 속도·각도
+      { time: ENTRY_B_T,      angles: poseB       },  // J1 복귀
+      { time: ENTRY_CROSS_T,  angles: leftInCross },  // 왼팔 먼저 교차 자세로 진입 + 고정(이후 계속 고정)
+      { time: READY_TIME,     angles: rightReady  },  // 오른팔이 앞을 가로질러 들어가 준비 자세(아직 타격 아님)
       ...strikeFrames,
-      ...tail,
+      ...makeTail(0),
     ];
   }
 
