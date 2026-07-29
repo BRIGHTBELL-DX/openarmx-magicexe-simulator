@@ -108,40 +108,13 @@ function _snapshotPositions() {
 }
 
 function _loadDrumPresets() {
-  // 배포 기본 시드 — 템플릿 1은 배포 기본값, 템플릿 2·3은 사용자가
-  // 실물 테스트용으로 확정한 좌표
+  // 배포 기본 시드 — 템플릿 1(배포 기본값)만 유지. 나머지 실물 테스트용
+  // 템플릿(2~5)은 오프라인/시뮬레이터 재검증 후 다시 추가할 예정으로
+  // 우선 제거함(git 이력에서 이전 버전 참고).
   const t1 = {};
   DEFAULT_DRUM_KIT.forEach(d => { t1[d.id] = { ...d.pos }; });
   const seeds = [
     { name: '템플릿 1', positions: t1 },
-    { name: '템플릿 2', positions: {
-        d0:{x:0.64, y:0.41,  z:0.40}, d1:{x:0.77, y:0.31,  z:0.50},
-        d2:{x:0.66, y:0.19,  z:0.28}, d3:{x:0.76, y:0.11,  z:0.50},
-        d4:{x:0.63, y:0.00,  z:0.12},
-        d5:{x:0.77, y:-0.11, z:0.50}, d6:{x:0.66, y:-0.22, z:0.26},
-        d7:{x:0.72, y:-0.40, z:0.50},
-      } },
-    { name: '템플릿 3', positions: {
-        d0:{x:0.56, y:0.54,  z:0.40}, d1:{x:0.77, y:0.32,  z:0.50},
-        d2:{x:0.59, y:0.42,  z:0.18}, d3:{x:0.76, y:0.11,  z:0.45},
-        d4:{x:0.63, y:0.00,  z:0.12},
-        d5:{x:0.76, y:-0.11, z:0.45}, d6:{x:0.55, y:-0.46, z:0.18},
-        d7:{x:0.72, y:-0.40, z:0.50},
-      } },
-    { name: '템플릿 4', positions: {
-        d0:{x:0.61, y:0.60,  z:0.40}, d1:{x:0.76, y:0.37,  z:0.50},
-        d2:{x:0.51, y:0.41,  z:0.18}, d3:{x:0.76, y:0.16,  z:0.45},
-        d4:{x:0.63, y:0.00,  z:0.12},
-        d5:{x:0.76, y:-0.15, z:0.45}, d6:{x:0.51, y:-0.41, z:0.18},
-        d7:{x:0.80, y:-0.41, z:0.50},
-      } },
-    { name: '템플릿 5', positions: {
-        d0:{x:0.57, y:0.63,  z:0.35}, d1:{x:0.71, y:0.51,  z:0.45},
-        d2:{x:0.63, y:0.36,  z:0.25}, d3:{x:0.76, y:0.16,  z:0.40},
-        d4:{x:0.63, y:0.00,  z:0.12},
-        d5:{x:0.76, y:-0.15, z:0.40}, d6:{x:0.59, y:-0.40, z:0.25},
-        d7:{x:0.79, y:-0.41, z:0.45},
-      } },
   ];
   try {
     const raw = localStorage.getItem(_PRESET_STORE);
@@ -3785,7 +3758,7 @@ let startWall   = 0, pauseOffset = 0;
 let _playKFs    = { L: [], R: [], totalTime: 0 };
 let _playDur    = 0;
 let _flashState = {};
-let _playbackSpeed = 1;   // 참고 영상과 세밀하게 비교할 때 느리게 재생하기 위한 배속
+let _playbackSpeed = 1;   // 느리게 재생해서 세밀하게 볼 때 쓰는 배속
 
 function smoothStep(t) { return t * t * (3 - 2 * t); }
 
@@ -4233,39 +4206,27 @@ window.playAnim = function () {
   startWall = performance.now() - (pauseOffset / _playbackSpeed) * 1000;
   isPlaying = true;
   _playAudio(pauseOffset);
-  _syncRefVideo(pauseOffset);
-  if (_refVideoAudioCtx?.state === 'suspended') _refVideoAudioCtx.resume();
-  const v = _refVideoEl();
-  if (v) { v.playbackRate = _playbackSpeed; v.play().catch(() => {}); }
   _syncPlayBtns();
 };
 
-// 참고 영상과 프레임 단위로 세밀하게 비교할 때 실시간 재생은 너무 빨라
-// 보이므로(특히 압축 영상은 currentTime을 자주 바꾸면 키프레임 단위로만
-// 스킵돼 뚝뚝 끊겨 보인다) 배속을 낮춰 "연속 재생"으로 천천히 보는 편이
-// 개별 프레임을 seek하는 것보다 훨씬 자연스럽다.
+// 배속을 낮추면 실시간 재생보다 느린 "연속 재생"으로 세밀하게 볼 수 있다.
 window.setPlaybackSpeed = function (v) {
   const newSpeed = parseFloat(v) || 1;
   if (isPlaying) startWall = performance.now() - (pauseOffset / newSpeed) * 1000;
   _playbackSpeed = newSpeed;
   if (_audioSrc) _audioSrc.playbackRate.value = _playbackSpeed;
-  const video = _refVideoEl();
-  if (video) video.playbackRate = _playbackSpeed;
 };
 window.pauseAnim = function () {
   if (!isPlaying) return;
   pauseOffset = ((performance.now() - startWall) / 1000) % _playDur;
   isPlaying   = false;
   _pauseAudio();
-  _refVideoEl()?.pause();
   _syncPlayBtns();
 };
 window.stopAnim = function () {
   isPlaying   = false;
   pauseOffset = 0;
   _stopAudio();
-  _refVideoEl()?.pause();
-  _syncRefVideo(0);
   clearTCPTrails();
   // 정지 시점에 "타격 중"이던 드럼이 발광/확대된 채로 굳지 않게 상태를 리셋한다.
   Object.keys(_flashState).forEach(k => { _flashState[k] = false; });
@@ -4304,9 +4265,6 @@ function seekTo(t) {
   _updatePlayhead(t);
   if (isPlaying) _playAudio(t);
   else _audioPlayOff = t;
-  _syncRefVideo(t);
-  if (isPlaying) _refVideoEl()?.play().catch(() => {});
-  else _refVideoEl()?.pause();
 }
 
 document.getElementById('scrubber').addEventListener('input', function () {
@@ -4315,7 +4273,6 @@ document.getElementById('scrubber').addEventListener('input', function () {
 
 // ◀/▶ 버튼과 방향키(←/→) 이동 — dir=-1/1, beatStep=true면 현재 비트 스냅
 // 분해능(예: 1/8박) 단위로, false면 1프레임(1/60초) 단위로 움직인다.
-// 참고 영상과 비교하며 정확히 어느 프레임에 어떤 타격이 맞는지 확인할 때 씀.
 window.stepPlayhead = function (dir, beatStep) {
   const beatDur   = 60 / bpm;
   const div       = parseInt(document.getElementById('grid-sel')?.value || 8);
@@ -4419,7 +4376,6 @@ function animate() {
     document.getElementById('scrubber').value = t;
     updateTimeLbl(t);
     _updatePlayhead(t);
-    _syncRefVideo(t);
 
     const beatDur   = 60 / bpm;
     const introOff  = _getAudioTimeOffset(); // 인트로 ON → 4.0s, OFF → 0
@@ -4530,6 +4486,11 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
 
   const track = BGM_TRACKS[choice];
   if (!track) return;
+  // 트랙을 새로 받는 동안(캐시에 없으면 네트워크 왕복이 걸림) 드롭다운을
+  // 잠그고 "로드 중" 표시를 해서 아무 반응이 없는 것처럼 보이지 않게 한다.
+  if (sel) sel.disabled = true;
+  const nameEl = document.getElementById('audio-name');
+  if (nameEl) nameEl.textContent = `⏳ ${track.label} 로드 중...`;
   try {
     if (!_audioCtx) _audioCtx = new AudioContext();
     if (!silent) setStatus(`음악 로드 중: ${track.label}...`);
@@ -4537,7 +4498,6 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     const buf = await res.arrayBuffer();
     _audioBuf = await _audioCtx.decodeAudioData(buf);
     _audioGen++;
-    const nameEl = document.getElementById('audio-name');
     if (nameEl) nameEl.textContent = track.label;
 
     // 곡이 고정 길이이므로, 타임라인(마디 수)이 곡 전체 길이를 항상
@@ -4557,7 +4517,10 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     // 재생 중에 트랙을 바꾼 경우 새 버퍼로 이어서 재생되도록 다시 시작한다.
     if (isPlaying) _playAudio(pauseOffset);
   } catch (err) {
+    if (nameEl) nameEl.textContent = '로드 실패';
     setStatus(`${track.label} 로드 실패: ` + err.message);
+  } finally {
+    if (sel) sel.disabled = false;
   }
 };
 
@@ -4570,159 +4533,9 @@ async function _autoLoadDefaultSong() {
   setStatus(`곡 자동 로드: ${track.label} (${_audioBuf?.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  참고 영상 (오프셋 동기화) — 실제로 자르지 않고, 영상 재생 위치를
-//  음악 타임라인과 맞추는 오프셋(초)만 입력받는다. 영상 자체 소리는
-//  음소거하지 않아(토글만 제공) 손 위치·타이밍을 소리로도 확인 가능.
-// ═══════════════════════════════════════════════════════════════
-let videoOffset = 0;
-function _refVideoEl() { return document.getElementById('ref-video-el'); }
-
-// 업로드한 참고 영상 파일 자체(Blob)를 IndexedDB에 저장해, 새로고침해도
-// "제거" 버튼을 누르기 전까지는 다시 불러올 필요 없이 유지되게 한다.
-// localStorage는 용량이 작아(수MB) 영상 파일엔 안 맞아 IndexedDB를 쓴다.
-const _REF_VIDEO_DB = 'magicexe_ref_video_db', _REF_VIDEO_STORE = 'video';
-function _openRefVideoDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(_REF_VIDEO_DB, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(_REF_VIDEO_STORE);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror   = () => reject(req.error);
-  });
-}
-async function _saveRefVideoToDB(file) {
-  try {
-    const db = await _openRefVideoDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(_REF_VIDEO_STORE, 'readwrite');
-      tx.objectStore(_REF_VIDEO_STORE).put({ blob: file, name: file.name }, 'current');
-      tx.oncomplete = resolve;
-      tx.onerror    = () => reject(tx.error);
-    });
-  } catch (e) { /* IndexedDB 사용 불가 환경 — 이번 세션에서만 유지됨 */ }
-}
-async function _loadRefVideoFromDB() {
-  try {
-    const db = await _openRefVideoDB();
-    return await new Promise((resolve, reject) => {
-      const tx  = db.transaction(_REF_VIDEO_STORE, 'readonly');
-      const req = tx.objectStore(_REF_VIDEO_STORE).get('current');
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror   = () => reject(req.error);
-    });
-  } catch (e) { return null; }
-}
-async function _clearRefVideoDB() {
-  try {
-    const db = await _openRefVideoDB();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(_REF_VIDEO_STORE, 'readwrite');
-      tx.objectStore(_REF_VIDEO_STORE).delete('current');
-      tx.oncomplete = resolve;
-      tx.onerror    = () => reject(tx.error);
-    });
-  } catch (e) {}
-}
-// 페이지 로드 시 저장된 영상이 있으면 자동 복원
-(async function _restoreRefVideo() {
-  const rec = await _loadRefVideoFromDB();
-  if (!rec) return;
-  const video = _refVideoEl();
-  if (!video) return;
-  video.src = URL.createObjectURL(rec.blob);
-  const nameEl = document.getElementById('ref-video-name');
-  if (nameEl) nameEl.textContent = rec.name;
-  setStatus(`참고 영상 복원: ${rec.name}`);
-})();
-
-window.toggleRefVideoPanel = function () {
-  document.getElementById('video-panel')?.classList.toggle('collapsed');
-};
 window.toggleDrumPanel = function () {
   document.getElementById('drum-panel')?.classList.toggle('collapsed');
 };
-window.toggleStrokePanel = function () {
-  document.getElementById('stroke-panel')?.classList.toggle('collapsed');
-};
-
-window.loadRefVideo = function (input) {
-  const file = input.files[0];
-  if (!file) return;
-  const video = _refVideoEl();
-  if (!video) return;
-  video.src = URL.createObjectURL(file);
-  const nameEl = document.getElementById('ref-video-name');
-  if (nameEl) nameEl.textContent = file.name;
-  _ensureRefVideoGain();   // 사용자가 파일을 고른 시점(제스처)에 오디오 그래프 준비
-  _saveRefVideoToDB(file);
-  setStatus(`참고 영상 로드: ${file.name} — 오프셋을 조절해 음악 시작 지점과 맞추세요`);
-};
-
-window.clearRefVideo = function () {
-  const video = _refVideoEl();
-  if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
-  const nameEl = document.getElementById('ref-video-name');
-  if (nameEl) nameEl.textContent = '파일 없음';
-  const fileInput = document.getElementById('ref-video-file');
-  if (fileInput) fileInput.value = '';
-  _clearRefVideoDB();
-  setStatus('참고 영상 제거됨');
-};
-
-window.setRefVideoOffset = function (val) {
-  videoOffset = parseFloat(val) || 0;
-};
-
-window.toggleRefVideoMute = function () {
-  const video = _refVideoEl();
-  if (!video) return;
-  video.muted = !video.muted;
-  const btn = document.getElementById('ref-video-mute-btn');
-  if (btn) btn.textContent = video.muted ? '🔇' : '🔊';
-};
-
-// 참고 영상 자체 소리 크기 — <video>의 기본 volume은 0~1(100%)까지만 되고
-// 원본 녹화 음량이 작으면 그 이상 키울 방법이 없다. Web Audio GainNode를
-// 거치게 하면 100%(1.0)를 넘겨 원본보다 증폭할 수 있다(최대 250%).
-// createMediaElementSource는 같은 <video> 엘리먼트에 대해 딱 한 번만 호출
-// 가능하므로(두 번째 호출은 예외 발생) _refVideoGainNode가 있으면 재사용.
-let _refVideoAudioCtx  = null;
-let _refVideoGainNode  = null;
-function _ensureRefVideoGain() {
-  if (_refVideoGainNode) return _refVideoGainNode;
-  const video = _refVideoEl();
-  if (!video) return null;
-  try {
-    _refVideoAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = _refVideoAudioCtx.createMediaElementSource(video);
-    _refVideoGainNode = _refVideoAudioCtx.createGain();
-    _refVideoGainNode.gain.value = parseFloat(document.getElementById('ref-video-volume')?.value) || 1;
-    src.connect(_refVideoGainNode).connect(_refVideoAudioCtx.destination);
-  } catch (e) { /* 이미 다른 곳에서 연결된 경우 등 — 무시 */ }
-  return _refVideoGainNode;
-}
-window.setRefVideoVolume = function (val) {
-  const v = parseFloat(val) || 0;
-  const gain = _ensureRefVideoGain();
-  if (_refVideoAudioCtx?.state === 'suspended') _refVideoAudioCtx.resume();
-  if (gain) gain.gain.value = v;
-  const lbl = document.getElementById('ref-video-volume-val');
-  if (lbl) lbl.textContent = Math.round(v * 100) + '%';
-};
-
-// 타임라인 시간(t, 인트로 포함) → 참고 영상 재생 위치로 변환해 맞춘다.
-// _getAudioTimeOffset()과 같은 기준(인트로 구간)에 videoOffset을 더함.
-function _syncRefVideo(t) {
-  const video = _refVideoEl();
-  if (!video || !video.src) return;
-  const songT = t - _getAudioTimeOffset();
-  const pos   = songT + videoOffset;
-  if (pos < 0 || (video.duration && pos > video.duration)) {
-    video.pause();
-    return;
-  }
-  if (Math.abs(video.currentTime - pos) > 0.15) video.currentTime = pos;
-}
 
 /** 인트로 구간(0 ~ introDur) 동안 음악 재생을 지연시키는 오디오 오프셋 */
 function _getAudioTimeOffset() {
@@ -5095,7 +4908,6 @@ function renderTimeline() {
   _updatePlayhead(pauseOffset);
 
   _renderWaveform(totalW);
-  _renderOnsetLines(totalW);
 }
 
 // ── 재생 음악 파형 ───────────────────────────────────────────
@@ -5161,108 +4973,6 @@ function _renderWaveform(totalW) {
     ctx.rect(px, y0, 1, Math.max(1, y1 - y0));
   }
   ctx.fill();
-}
-
-// ── 온셋(소리가 갑자기 튀는 지점) 자동 감지 + 점선 표시 ──────────
-// 목적: 아직 BPM/박자가 곡과 정확히 안 맞을 때, 실제 소리가 튀는 순간을
-// 점선으로 찍어두면 "이 점선에 하이햇/스네어 점이 정확히 걸리는가"로
-// 눈으로 확인하며 비트를 맞출 수 있다. 알고리즘은 프레임별 에너지의
-// 변화량(스펙트럴 플럭스 대용)이 주변 구간 평균보다 확 튀는 지점을
-// 국소 최댓값으로 잡는 단순한 온셋 검출 — 리듬 게임/DAW급 정밀도는
-// 아니지만, 사람이 듣기에 "확 튀는" 지점은 충분히 잘 잡는다.
-function _detectOnsets(buf) {
-  const sr  = buf.sampleRate;
-  const ch0 = buf.getChannelData(0);
-  const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : null;
-  const hop = 512;
-  const n   = ch0.length;
-  const nFrames = Math.floor(n / hop);
-  const env = new Float32Array(nFrames);
-  for (let i = 0; i < nFrames; i++) {
-    let s = 0;
-    const st = i * hop;
-    for (let j = 0; j < hop; j++) {
-      const v = ch1 ? (ch0[st + j] + ch1[st + j]) * 0.5 : ch0[st + j];
-      s += v * v;
-    }
-    env[i] = Math.sqrt(s / hop);
-  }
-  const flux = new Float32Array(nFrames);
-  for (let i = 1; i < nFrames; i++) flux[i] = Math.max(0, env[i] - env[i - 1]);
-
-  // 적응형 임계값: 주변 ~0.5초 구간 평균 대비 확실히 튀는 지점만, 국소
-  // 최댓값에서, 최소 간격(60ms) 이상 벌어진 것만 온셋으로 채택 — 안 그러면
-  // 진짜 타격 하나가 여러 개의 인접한 프레임으로 겹쳐 찍힌다.
-  const winFrames    = Math.round(0.5 * sr / hop);
-  const minGapFrames = Math.round(0.06 * sr / hop);
-  const onsets = [];
-  let lastOnsetFrame = -Infinity;
-  for (let i = 2; i < nFrames - 2; i++) {
-    if (i - lastOnsetFrame <= minGapFrames) continue;
-    if (!(flux[i] >= flux[i - 1] && flux[i] >= flux[i + 1])) continue;   // 국소 최댓값만
-    const lo = Math.max(0, i - winFrames), hi = Math.min(nFrames, i + winFrames);
-    let sum = 0;
-    for (let k = lo; k < hi; k++) sum += flux[k];
-    const mean = sum / (hi - lo);
-    if (flux[i] > mean * 1.8 + 0.006) {
-      onsets.push(i * hop / sr);
-      lastOnsetFrame = i;
-    }
-  }
-  return onsets;
-}
-
-let _onsetTimes    = null;   // 오디오 자체에서 뽑은 온셋 시각(초) — bpm/그리드와 무관, audioGen에만 의존
-let _onsetForGen   = -1;
-let _onsetLinesKey = null;
-function _renderOnsetLines(totalW) {
-  const canvas = document.getElementById('tl-onset-lines');
-  if (!canvas) return;
-  const on = document.getElementById('chk-onset-lines')?.checked ?? true;
-  if (!on || !_audioBuf) {
-    canvas.width = canvas.height = 0;
-    _onsetLinesKey = null;
-    return;
-  }
-  if (_onsetForGen !== _audioGen) {
-    _onsetTimes  = _detectOnsets(_audioBuf);
-    _onsetForGen = _audioGen;
-  }
-
-  // canvas는 대체 요소라 top:0만으로는 늘어나지 않으므로 height를 명시
-  // 지정해야 한다. #tl-scroll.scrollHeight는 콘텐츠가 짧으면(드럼이 적어
-  // 레인 전체 높이가 flex가 할당한 영역보다 작을 때) 실제 콘텐츠 길이가
-  // 아니라 그 할당된 영역 높이를 반환해버려(레인 아래로 삐져나옴) 부정확
-  // 하다 — 대신 "파형 상단"과 "마지막 레인 하단" 두 실제 요소 사이의
-  // 거리를 직접 잰다.
-  const waveTop    = document.getElementById('tl-waveform')?.getBoundingClientRect().top ?? 0;
-  const lanesBottom = document.getElementById('tl-lanes')?.getBoundingClientRect().bottom ?? waveTop;
-  const cssH = Math.max(1, lanesBottom - waveTop);
-  canvas.style.width  = totalW + 'px';
-  canvas.style.height = cssH + 'px';
-  const key  = `${_audioGen}|${bpm}|${Math.round(totalW)}|${Math.round(cssH)}`;
-  if (key === _onsetLinesKey) return;
-  _onsetLinesKey = key;
-
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  canvas.width  = Math.max(1, Math.round(totalW * dpr));
-  canvas.height = Math.max(1, Math.round(cssH * dpr));
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, totalW, cssH);
-
-  const pxPerSecond = PX_PER_BEAT * bpm / 60;
-  ctx.strokeStyle = 'rgba(255,160,0,0.55)';
-  ctx.lineWidth   = 1;
-  ctx.setLineDash([4, 4]);
-  _onsetTimes.forEach(t => {
-    const x = t * pxPerSecond;
-    if (x < 0 || x > totalW) return;
-    ctx.beginPath();
-    ctx.moveTo(Math.round(x) + 0.5, 0);
-    ctx.lineTo(Math.round(x) + 0.5, cssH);
-    ctx.stroke();
-  });
 }
 
 // 이벤트가 실제로 타격하는 팔 — evt.arm(수동 오버라이드)이 있으면 그걸,
@@ -5696,9 +5406,6 @@ document.addEventListener('click', e => {
   }
 });
 
-// 참고 영상 패널은 비트를 찍는 동안 계속 봐야 하므로(타임라인 클릭 등
-// 외부 클릭에) 자동으로 닫히지 않는다 — 🎬 토글 버튼으로만 열고 닫는다.
-
 // 프리셋 버튼을 SKIN_PRESETS 데이터에서 동적 생성
 function renderSkinPresets() {
   const container = document.getElementById('skin-presets-container');
@@ -5892,33 +5599,10 @@ document.getElementById('bpm-inp').addEventListener('change', () => {
   if (!isPlaying) renderFrame(pauseOffset);
 });
 
-// 스트로크 튜닝 슬라이더 공통 rebuild
-function _rebuildStroke() {
-  _playKFs = buildFinalKeyframes();
-  _playDur  = _playKFs.totalTime;
-  if (!isPlaying) renderFrame(pauseOffset);
-}
-
-// 스트로크 튜닝: 슬라이더 ↔ 숫자 입력 연동 헬퍼
-function _bindStrokePair(sliderId, numId, setter, min, max) {
-  const slider = document.getElementById(sliderId);
-  const num    = document.getElementById(numId);
-  slider.addEventListener('input', function () {
-    const v = parseFloat(this.value);
-    setter(v);
-    num.value = v.toFixed(2);
-    _rebuildStroke();
-  });
-  num.addEventListener('change', function () {
-    const v = Math.min(max, Math.max(min, parseFloat(this.value) || 0));
-    setter(v);
-    slider.value = v;
-    this.value   = v.toFixed(2);
-    _rebuildStroke();
-  });
-}
-_bindStrokePair('stick-j7-slider',  'stick-j7-val',  v => { stickJ7Offset  = v; saveSettings(); }, -0.6, 0.6);
-_bindStrokePair('contact-boost-slider', 'contact-boost-val', v => { contactBoostMax = v; saveSettings(); }, 0.3, 1.5);
+// stickJ7Offset/contactBoostMax 실시간 튜닝 UI(스트로크 패널)는 슬라이더를
+// 움직일 때마다 buildFinalKeyframes()를 전체(1400+ 타격) 재계산해 렉이
+// 심했다 — 패널은 제거하고 기본값(stickJ7Offset=0, contactBoostMax=0.6)만
+// 고정으로 쓴다. 재도입하려면 git 이력에서 이 커밋 이전 버전 참고.
 document.getElementById('bpm-inp').addEventListener('input', () => saveSettings());
 document.getElementById('meter-sel').addEventListener('change', () => {
   beatsPerBar = parseInt(document.getElementById('meter-sel').value) || 4;
@@ -5929,7 +5613,6 @@ document.getElementById('bars-inp').addEventListener('change', () => {
   renderTimeline(); updateTLInfo(); saveSettings();
 });
 document.getElementById('grid-sel').addEventListener('change', () => renderTimeline());
-document.getElementById('chk-onset-lines').addEventListener('change', () => renderTimeline());
 
 // ═══════════════════════════════════════════════════════════════
 //  유틸
@@ -5988,9 +5671,18 @@ loadTimeline();   // 타임라인 이벤트 복원
 renderTimeline();
 updateTLInfo();
 _autoLoadDefaultSong();
+// 타격 1400개+ 곡은 전체 궤적(IK) 계산에 수 초가 걸린다 — 로드 즉시 동기로
+// 돌리면 그동안 화면(헤더·드럼 패널·타임라인)이 그려지기도 전에 탭이
+// 멈춘 것처럼 보인다. setTimeout(0)으로 한 틱 미뤄서 브라우저가 먼저
+// 페인트를 마치게 한 뒤 계산을 시작한다 — 계산 자체 시간은 그대로지만
+// 화면이 먼저 뜨므로 "멈춘 것처럼" 보이던 문제는 없어진다.
 if (timelineEvents.length) {
-  _playKFs = buildFinalKeyframes();
-  _playDur  = _playKFs.totalTime;
-  document.getElementById('scrubber').max = _playDur;
+  setStatus(`재생 궤적 계산 중... (타격 ${timelineEvents.length}개)`);
+  setTimeout(() => {
+    _playKFs = buildFinalKeyframes();
+    _playDur  = _playKFs.totalTime;
+    document.getElementById('scrubber').max = _playDur;
+    setStatus(`준비 완료 — 타격 ${timelineEvents.length}개 · ${_playDur.toFixed(1)}s`);
+  }, 0);
 }
 setStatus('드럼 키트 로드됨 — 타임라인 클릭으로 배치 · 뷰포트 드래그로 위치 이동');

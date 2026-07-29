@@ -1,8 +1,8 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 :root {
   --hdr:   50px;
-  --tl-h:  360px;
-  --panel-w: 580px;
+  --tl-h:  404px;
+  --panel-w: 680px;
   --bg:    #08080e;
   --bg2:   #0d0d1e;
   --bg3:   #111126;
@@ -142,67 +142,6 @@ body {
   flex-shrink: 0;
 }
 
-/* ── 스트로크 튜닝 패널 ── */
-#stroke-panel {
-  width: 210px;
-  background: var(--bg2);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  flex-shrink: 0;
-  order: 3;
-}
-.stroke-sliders {
-  padding: 14px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.stroke-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.stroke-label {
-  font-size: 11px;
-  color: #aabbdd;
-  font-weight: 600;
-}
-.stroke-joint {
-  font-size: 10px;
-  color: #5577bb;
-  font-weight: 400;
-}
-.stroke-ctrl {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.stroke-slider {
-  flex: 1;
-  accent-color: #4488ff;
-}
-.stroke-val-inp {
-  width: 54px;
-  font-size: 11px;
-  color: #88aaee;
-  font-family: monospace;
-  text-align: right;
-  background: #0a0a1a;
-  border: 1px solid #2a3a60;
-  border-radius: 3px;
-  padding: 2px 4px;
-  flex-shrink: 0;
-}
-.stroke-val-inp:focus {
-  outline: none;
-  border-color: #4488ff;
-}
-.stroke-val-inp::-webkit-inner-spin-button,
-.stroke-val-inp::-webkit-outer-spin-button {
-  opacity: 0.4;
-}
 .panel-header {
   padding: 6px 12px;
   font-size: 12px;
@@ -836,7 +775,7 @@ body {
 }
 #pal-popup.open { display: flex; }
 
-/* ── 뷰포트 + 참고 영상 (가로 절반씩) ── */
+/* ── 뷰포트 ── */
 #viewport-row {
   flex: 1;
   display: flex;
@@ -844,7 +783,7 @@ body {
   min-width: 0;
 }
 /* 패널 열기/닫기 공통 — 닫으면 레이아웃에서 완전히 빠지고 나머지가
-   그만큼 넓어진다(드럼 키트·스트로크 튜닝·참고 영상 패널 공통) */
+   그만큼 넓어진다(드럼 키트·스트로크 튜닝 패널 공통) */
 .collapsed { display: none !important; }
 .panel-close-btn {
   background: transparent;
@@ -857,41 +796,6 @@ body {
   line-height: 1;
 }
 .panel-close-btn:hover { color: #e04848; }
-
-/* ── 참고 영상 패널 (뷰포트 옆, 가로 절반) ── */
-#video-panel {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg2);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 10px;
-  overflow-y: auto;
-}
-#ref-video-el {
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  background: #000;
-  border-radius: 6px;
-  display: block;
-  object-fit: contain;
-}
-#ref-video-name {
-  color: #6688aa;
-  font-size: 11px;
-}
-#ref-video-offset {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 4px;
-  padding: 4px 6px;
-  width: 80px;
-  font-size: 12px;
-}
 
 .pal-popup-header {
   font-size: 10px;
