@@ -20,12 +20,12 @@
   <div id="header-title">🥁 OpenArmX MAGIC.EXE 드럼 타임라인</div>
   <div id="header-controls">
     <div class="hdr-group">
-      <label>BPM <input id="bpm-inp" type="number" min="40" max="240" value="136" step="0.1"></label>
+      <label>BPM <input id="bpm-inp" type="number" min="40" max="240" value="137.000064" step="0.000001"></label>
       <label>박자 <select id="meter-sel">
         <option value="4">4/4</option>
         <option value="3">3/4</option>
       </select></label>
-      <label>마디 <input id="bars-inp" type="number" min="1" max="400" value="8" step="1"></label>
+      <label>마디 <input id="bars-inp" type="number" min="1" max="400" value="119" step="1"></label>
     </div>
 
     <div class="hdr-group">
@@ -47,8 +47,7 @@
       <label title="같은 타임라인 기준 3가지 BGM 버전 중 선택 — 끄기를 고르면 소리 없이 애니메이션만 재생됩니다">🎵 BGM
         <select id="bgm-sel" onchange="setBgmTrack(this.value)">
           <option value="mastering">믹스 (Mastering)</option>
-          <option value="drums">드럼만 (Drums)</option>
-          <option value="nodrum">노래만 (No Drum)</option>
+          <option value="bitcrush">비트크러시 (Bitcrush)</option>
           <option value="off">끄기</option>
         </select>
       </label>
@@ -315,6 +314,6 @@
 }
 </script>
 <script src="js/intro_outro_presets.js?v=13"></script>
-<script type="module" src="js/app.js?v=83"></script>
+<script type="module" src="js/app.js?v=84"></script>
 </body>
 </html>
