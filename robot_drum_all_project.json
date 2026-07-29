@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "savedAt": "2026-07-29T08:18:52.361Z",
+  "savedAt": "2026-07-29T23:53:29.307Z",
   "drumKit": [
     {
       "id": "d0",
@@ -368,11 +368,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 42,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 42,
       "vel": "hard"
@@ -399,11 +394,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 44,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 44,
       "vel": "hard"
     },
@@ -438,11 +428,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 46,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 46,
       "vel": "hard"
@@ -469,11 +454,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 48,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 48,
       "vel": "hard"
     },
@@ -508,11 +488,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 50,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 50,
       "vel": "hard"
@@ -539,11 +514,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 52,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 52,
       "vel": "hard"
     },
@@ -983,11 +953,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 90,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 90,
       "vel": "hard"
@@ -1014,11 +979,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 92,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 92,
       "vel": "hard"
     },
@@ -1053,11 +1013,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 94,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 94,
       "vel": "hard"
@@ -1088,11 +1043,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 96,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 96,
       "vel": "hard"
@@ -1114,11 +1064,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 98,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 98,
       "vel": "hard"
     },
@@ -1153,11 +1098,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 100,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 100,
       "vel": "hard"
@@ -1184,11 +1124,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 102,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 102,
       "vel": "hard"
     },
@@ -1223,11 +1158,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 104,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 104,
       "vel": "hard"
@@ -1254,11 +1184,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 106,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 106,
       "vel": "hard"
     },
@@ -1293,11 +1218,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 108,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 108,
       "vel": "hard"
@@ -1324,11 +1244,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 110,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 110,
       "vel": "hard"
     },
@@ -1363,11 +1278,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 112,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 112,
       "vel": "hard"
@@ -1393,11 +1303,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 114,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 114,
       "vel": "hard"
@@ -1415,11 +1320,6 @@
     {
       "drumId": "d0",
       "beat": 115.5,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
-      "beat": 116,
       "vel": "hard"
     },
     {
@@ -1443,11 +1343,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 118,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 118,
       "vel": "hard"
@@ -1465,11 +1360,6 @@
     {
       "drumId": "d0",
       "beat": 119.5,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
-      "beat": 120,
       "vel": "hard"
     },
     {
@@ -1563,11 +1453,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 130,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 130,
       "vel": "hard"
@@ -1594,11 +1479,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 132,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 132,
       "vel": "hard"
     },
@@ -1633,11 +1513,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 134,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 134,
       "vel": "hard"
@@ -1664,11 +1539,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 136,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 136,
       "vel": "hard"
     },
@@ -1703,11 +1573,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 138,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 138,
       "vel": "hard"
@@ -1734,11 +1599,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 140,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 140,
       "vel": "hard"
     },
@@ -1773,11 +1633,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 142,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 142,
       "vel": "hard"
@@ -1803,11 +1658,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 144,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 144,
       "vel": "hard"
@@ -1829,11 +1679,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 146,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 146,
       "vel": "hard"
     },
@@ -1868,11 +1713,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 148,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 148,
       "vel": "hard"
@@ -1899,11 +1739,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 150,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 150,
       "vel": "hard"
     },
@@ -1938,11 +1773,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 152,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 152,
       "vel": "hard"
@@ -1973,11 +1803,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 154,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 154,
       "vel": "hard"
@@ -2004,11 +1829,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 156,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 156,
       "vel": "hard"
     },
@@ -2093,11 +1913,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 162,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 162,
       "vel": "hard"
@@ -2124,11 +1939,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 164,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 164,
       "vel": "hard"
     },
@@ -2163,11 +1973,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 166,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 166,
       "vel": "hard"
@@ -2198,11 +2003,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 168,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 168,
       "vel": "hard"
@@ -2229,11 +2029,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 170,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 170,
       "vel": "hard"
     },
@@ -2269,11 +2064,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 172,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 172,
       "vel": "hard"
     },
@@ -2558,11 +2348,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d2",
-      "beat": 192.5,
-      "vel": "hard"
-    },
-    {
       "drumId": "d1",
       "beat": 193,
       "vel": "hard"
@@ -2579,11 +2364,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 194,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 194,
       "vel": "hard"
     },
@@ -2618,11 +2398,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 196,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 196,
       "vel": "hard"
@@ -2649,11 +2424,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 198,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 198,
       "vel": "hard"
     },
@@ -2688,11 +2458,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 200,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 200,
       "vel": "hard"
@@ -2723,11 +2488,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 202,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 202,
       "vel": "hard"
@@ -2754,11 +2514,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 204,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 204,
       "vel": "hard"
     },
@@ -2808,11 +2563,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 210,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 210,
       "vel": "hard"
@@ -2839,11 +2589,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 212,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 212,
       "vel": "hard"
     },
@@ -2878,11 +2623,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 214,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 214,
       "vel": "hard"
@@ -2913,11 +2653,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 216,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 216,
       "vel": "hard"
@@ -2939,11 +2674,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 218,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 218,
       "vel": "hard"
     },
@@ -2978,11 +2708,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 220,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 220,
       "vel": "hard"
@@ -3009,11 +2734,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 222,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 222,
       "vel": "hard"
     },
@@ -3048,11 +2768,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 224,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 224,
       "vel": "hard"
@@ -3079,11 +2794,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 226,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 226,
       "vel": "hard"
     },
@@ -3118,11 +2828,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 228,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 228,
       "vel": "hard"
@@ -3149,11 +2854,6 @@
     },
     {
       "drumId": "d4",
-      "beat": 230,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
       "beat": 230,
       "vel": "hard"
     },
@@ -3188,11 +2888,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 232,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 232,
       "vel": "hard"
@@ -3218,11 +2913,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 234,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 234,
       "vel": "hard"
@@ -3240,11 +2930,6 @@
     {
       "drumId": "d0",
       "beat": 235.5,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
-      "beat": 236,
       "vel": "hard"
     },
     {
@@ -3268,11 +2953,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d7",
-      "beat": 238,
-      "vel": "hard"
-    },
-    {
       "drumId": "d2",
       "beat": 238,
       "vel": "hard"
@@ -3290,11 +2970,6 @@
     {
       "drumId": "d0",
       "beat": 239.5,
-      "vel": "hard"
-    },
-    {
-      "drumId": "d7",
-      "beat": 240,
       "vel": "hard"
     },
     {
@@ -5733,11 +5408,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d2",
-      "beat": 434,
-      "vel": "hard"
-    },
-    {
       "drumId": "d1",
       "beat": 437,
       "vel": "hard"
@@ -5988,11 +5658,6 @@
       "vel": "hard"
     },
     {
-      "drumId": "d0",
-      "beat": 457.5,
-      "vel": "hard"
-    },
-    {
       "drumId": "d4",
       "beat": 458,
       "vel": "hard"
@@ -6192,6 +5857,18 @@
     {
       "drumId": "d7",
       "beat": 441,
+      "vel": "hard",
+      "arm": "R"
+    },
+    {
+      "drumId": "d2",
+      "beat": 434,
+      "vel": "hard",
+      "arm": "L"
+    },
+    {
+      "drumId": "d1",
+      "beat": 138.5,
       "vel": "hard",
       "arm": "R"
     }
