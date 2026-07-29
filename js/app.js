@@ -2107,6 +2107,29 @@ function _analyticGuess(drum, phase) {
 // 스트라이크 솔브 캐시 — 드럼 위치·강도가 같으면 재계산 없음 (빠른 박자 대응)
 const _strikeSolveCache = new Map();
 
+// 이 캐시를 localStorage에도 저장해둔다 — 드럼 키트가 그대로면(대부분의
+// 새로고침) 키(드럼 위치·팔·타입·틸트·contactBoostMax를 모두 포함해
+// 자동으로 무효화됨)가 그대로 일치해 다중 시드 IK를 다시 안 풀어도 된다.
+// 이 IK 자체가 무거워서(도달 배지 계산 기준 실측 3드럼 11.5초) 8드럼
+// 전체를 매번 새로 풀면 새로고침마다 그 시간이 고스란히 걸렸다.
+const _STRIKE_CACHE_STORE = 'openarmx_strike_cache_v1';
+try {
+  const _rawStrikeCache = localStorage.getItem(_STRIKE_CACHE_STORE);
+  if (_rawStrikeCache) {
+    const _arr = JSON.parse(_rawStrikeCache);
+    if (Array.isArray(_arr)) _arr.forEach(([k, v]) => _strikeSolveCache.set(k, v));
+  }
+} catch (e) {}
+let _strikeCacheSaveTimer = null;
+function _persistStrikeSolveCache() {
+  clearTimeout(_strikeCacheSaveTimer);
+  // 도달 배지 계산 중엔 드럼마다 L/R 두 번씩 연속으로 캐시에 쓰이므로,
+  // 매번 전체 Map을 직렬화하지 않고 마지막 호출로부터 300ms 뒤 한 번만 쓴다.
+  _strikeCacheSaveTimer = setTimeout(() => {
+    try { localStorage.setItem(_STRIKE_CACHE_STORE, JSON.stringify([..._strikeSolveCache])); } catch (e) {}
+  }, 300);
+}
+
 function _solveStickStrike(drum, vel) {
   const s     = drum.arm;
   const vs    = VEL_SCALE[vel] ?? VEL_SCALE.medium;
@@ -2313,6 +2336,7 @@ function _solveStickStrike(drum, vel) {
   const result = { pose: solved, ok: errTip < 0.03, j7Strike: j7 + contactDelta, nominalJ7: j7, contactDelta };
   if (_strikeSolveCache.size > 300) _strikeSolveCache.clear();
   _strikeSolveCache.set(key, result);
+  _persistStrikeSolveCache();
   return result;
 }
 
@@ -3704,15 +3728,17 @@ function _updateDrumReachVisual(drum, force) {
   _updateArmReachBadges(drum, force);
 }
 
-// ── 팔별 실제 도달 가능 여부(단순 거리가 아니라 IK 수렴 기준) ──
-// 드럼 위치가 바뀔 때마다 왼팔/오른팔 각각 실제로 자연스럽게 닿는지 확인해
-// 드럼 키트 패널의 L/R 배지와 타임라인 레인의 절반 음영으로 즉시 보여준다.
-// setEventArm()의 경고 로직과 동일한 기준(거리 + _solveStickStrike().ok)을 쓴다.
+// ── 팔별 실제 도달 가능 여부(거리 기준 근사치) ──
+// 드럼 위치가 바뀔 때마다 왼팔/오른팔 각각 닿는지를 드럼 키트 패널의 L/R
+// 배지와 타임라인 레인의 절반 음영으로 즉시 보여준다.
+// 원래는 여기서 _solveStickStrike(다중 시드 IK)까지 돌려 정밀하게 확인했으나,
+// 드럼 8개 전체를 매번 그렇게 풀면(실측 3드럼 기준 11.5초) 새로고침마다
+// 그 시간이 고스란히 걸렸다 — 실제 자세는 어차피 3D 뷰포트로 눈으로 바로
+// 확인 가능하므로, 배지는 빠른 거리 기준 근사치만 쓰고 정밀 IK는 뺐다.
 function _armReachOk(drum, arm) {
   if (drum.type === 'kick') return true;
   const test = { ...drum, arm };
-  if (reachDist(test) > STICK_REACH) return false;
-  return _solveStickStrike(test, 'medium').ok;
+  return reachDist(test) <= STICK_REACH;
 }
 
 // IK 수렴 확인은 드래그 중 매 mousemove마다 돌리기엔 무겁다 — 배지·레인
