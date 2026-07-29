@@ -3705,77 +3705,20 @@ function rebuildDrumSpheres() {
     grp.add(base);
   });
 
-  // force=true(드래그 종료 등)로 도달성 배지를 갱신하면 드럼마다 양팔의
-  // _solveStickStrike(다중 시드 IK)를 캐시 없이 새로 도는데, 페이지를 처음
-  // 열 때는 _strikeSolveCache가 완전히 비어 있어 이 한 줄이 수 초~수십 초를
-  // 그대로 메인 스레드에서 막아버렸다(실측: 3드럼 기준 11.5초, 배포 사이트
-  // 기준 더 큰 지연) — 오디오 fetch·첫 렌더까지 전부 이 뒤에서 대기하게 돼
-  // "새로고침하면 로드가 엄청 늦다"는 증상의 원인이었다. setTimeout으로
-  // 한 틱 미뤄서 크리티컬 패스(첫 렌더·오디오 로드) 뒤에 돌게 한다 — 배지가
-  // 화면에 반영되는 시점만 살짝(체감 안 되는 수준) 늦어질 뿐, 정확도는 동일.
-  setTimeout(() => drumKit.forEach(drum => _updateDrumReachVisual(drum, true)), 0);
+  drumKit.forEach(drum => _updateDrumReachVisual(drum));
 }
 
 // 팔이 닿지 않는 위치로 옮겨졌을 때 드럼 헤드 색을 빨간색으로 바꿔 재생 없이도
-// 바로 알 수 있게 한다(킥은 팔 미배정이라 대상 아님).
-function _updateDrumReachVisual(drum, force) {
+// 바로 알 수 있게 한다(킥은 팔 미배정이라 대상 아님). 거리 기준 근사치라
+// 계산이 가벼워 드래그 중 매 프레임 호출해도 문제없다 — 정밀한 팔별 도달
+// 여부는 3D 뷰포트로 직접 눈으로 확인한다.
+function _updateDrumReachVisual(drum) {
   const mesh = drumMeshes[drum.id];
   if (!mesh || drum.type === 'kick') return;
   const unreachable = reachDist(drum) > STICK_REACH;
   const baseColor = unreachable ? 0xe04040 : DRUM_TYPES[drum.type].color;
   mesh.material.color.set(baseColor);
   mesh.material.emissive.set(baseColor).multiplyScalar(0.20);
-  _updateArmReachBadges(drum, force);
-}
-
-// ── 팔별 실제 도달 가능 여부(거리 기준 근사치) ──
-// 드럼 위치가 바뀔 때마다 왼팔/오른팔 각각 닿는지를 드럼 키트 패널의 L/R
-// 배지와 타임라인 레인의 절반 음영으로 즉시 보여준다.
-// 원래는 여기서 _solveStickStrike(다중 시드 IK)까지 돌려 정밀하게 확인했으나,
-// 드럼 8개 전체를 매번 그렇게 풀면(실측 3드럼 기준 11.5초) 새로고침마다
-// 그 시간이 고스란히 걸렸다 — 실제 자세는 어차피 3D 뷰포트로 눈으로 바로
-// 확인 가능하므로, 배지는 빠른 거리 기준 근사치만 쓰고 정밀 IK는 뺐다.
-function _armReachOk(drum, arm) {
-  if (drum.type === 'kick') return true;
-  const test = { ...drum, arm };
-  return reachDist(test) <= STICK_REACH;
-}
-
-// IK 수렴 확인은 드래그 중 매 mousemove마다 돌리기엔 무겁다 — 배지·레인
-// 음영은 150ms에 한 번만 갱신(드럼 헤드 색은 위에서 이미 즉시 갱신됨).
-let _reachBadgeTs = 0;
-function _updateArmReachBadges(drum, force) {
-  if (drum.type === 'kick') return;
-  // 뷰포트에서 드럼을 드래그하는 동안은(force 없이 호출되는 매 mousemove)
-  // 이 IK 계산을 건너뛴다 — 실측 결과 드래그 중 150ms 스로틀로도 여전히
-  // 버벅임이 심했다(_solveStickStrike가 시드 여러 개를 도는 반복 계산이라
-  // 드래그처럼 위치가 매 프레임 달라지면 캐시도 못 타 매번 새로 풂).
-  // 드래그 중엔 색상만(reachDist 기반, 이미 별도로 즉시 갱신됨) 보여주고,
-  // 정확한 L/R 배지·타임라인 음영은 드래그가 끝나는 순간(mouseup, force
-  // 호출)이나 숫자 입력 시에만 계산한다.
-  if (!force && _isDragging) return;
-  const now = performance.now();
-  if (!force && now - _reachBadgeTs < 150) return;
-  _reachBadgeTs = now;
-
-  const okL = _armReachOk(drum, 'L');
-  const okR = _armReachOk(drum, 'R');
-  drum._reachL = okL;
-  drum._reachR = okR;
-
-  const badge = document.querySelector(`.drum-row[data-id="${drum.id}"] .drum-reach-badge`);
-  if (badge) {
-    const bl = badge.querySelector('.reach-l');
-    const br = badge.querySelector('.reach-r');
-    if (bl) { bl.classList.toggle('ok', okL); bl.classList.toggle('bad', !okL); bl.title = `왼팔 — ${okL ? '타격 가능' : '현재 위치에서 도달 불가(자세 부자연)'}`; }
-    if (br) { br.classList.toggle('ok', okR); br.classList.toggle('bad', !okR); br.title = `오른팔 — ${okR ? '타격 가능' : '현재 위치에서 도달 불가(자세 부자연)'}`; }
-  }
-
-  const lane = document.querySelector(`.tl-lane[data-drum-id="${drum.id}"]`);
-  if (lane) {
-    lane.classList.toggle('half-l-unreachable', !okL);
-    lane.classList.toggle('half-r-unreachable', !okR);
-  }
 }
 
 // ── 재생 상태 ────────────────────────────────────────────────
@@ -4692,7 +4635,7 @@ renderer.domElement.addEventListener('mouseup', () => {
     _checkTemplateDirty();
     renderDrumList();
     const dragged = drumKit.find(d => d.id === _dragDrumId);
-    if (dragged) _updateDrumReachVisual(dragged, true);
+    if (dragged) _updateDrumReachVisual(dragged);
     _playKFs = buildFinalKeyframes();
     _playDur = _playKFs.totalTime;
     _dragDrumId = null;
@@ -4854,9 +4797,7 @@ function renderTimeline() {
   drumKit.forEach(drum => {
     const lane = document.createElement('div');
     const splitArm = drum.type !== 'kick'; // 킥은 팔이 없어 구분 안 함
-    lane.className       = 'tl-lane' + (splitArm ? ' split' : '')
-      + (splitArm && drum._reachL === false ? ' half-l-unreachable' : '')
-      + (splitArm && drum._reachR === false ? ' half-r-unreachable' : '');
+    lane.className       = 'tl-lane' + (splitArm ? ' split' : '');
     lane.style.width     = totalW + 'px';
     lane.dataset.drumId  = drum.id;
     const typeInfo = DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
@@ -5513,11 +5454,6 @@ function renderDrumList() {
     <option value="L" ${drum.arm==='L'?'selected':''}>L</option>
     <option value="R" ${drum.arm==='R'?'selected':''}>R</option>
   </select>`}
-  ${isKick
-    ? `<span class="drum-reach-badge"></span>`
-    : `<span class="drum-reach-badge" title="이 위치에서 왼팔/오른팔로 실제로 자연스럽게 닿는지">
-    <span class="reach-l ${drum._reachL === false ? 'bad' : 'ok'}">L</span><span class="reach-r ${drum._reachR === false ? 'bad' : 'ok'}">R</span>
-  </span>`}
   <input class="drum-pos-inp" type="number" step="0.01" title="X (앞)" value="${drum.pos.x.toFixed(2)}"
     onchange="updateDrumPos('${drum.id}','x',+this.value)">
   <input class="drum-pos-inp" type="number" step="0.01" title="Y (좌우)" value="${drum.pos.y.toFixed(2)}"
@@ -5559,7 +5495,7 @@ window.updateDrumPos = function (id, axis, val) {
   const grp = drumGroups[id];
   if (grp) grp.position.set(drum.pos.x, drum.pos.y, drum.pos.z);
 
-  _updateDrumReachVisual(drum, true);   // 전체 재렌더 없이 도달 불가 시 드럼 색만 갱신
+  _updateDrumReachVisual(drum);   // 전체 재렌더 없이 도달 불가 시 드럼 색만 갱신
 
   // 소수점 2자리로 표시 정규화
   const item = document.querySelector(`.drum-row[data-id="${id}"]`);

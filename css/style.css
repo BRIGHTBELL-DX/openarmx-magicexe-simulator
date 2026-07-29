@@ -209,7 +209,7 @@ body {
    전부 배치한다(예전엔 2열 카드로 쌓아서 세로 공간이 많이 필요했음). */
 .drum-row {
   display: grid;
-  grid-template-columns: 8px minmax(46px,1fr) 60px 30px 32px 58px 58px 58px 60px 16px 16px;
+  grid-template-columns: 8px minmax(46px,1fr) 60px 30px 58px 58px 58px 60px 16px 16px;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
@@ -252,14 +252,6 @@ body {
   cursor: pointer;
 }
 .drum-autogen-chk input { cursor: pointer; margin: 0; }
-/* 이 위치에서 왼팔/오른팔이 실제로 자연스럽게 닿는지(IK 수렴 기준) 즉시 표시 */
-.drum-reach-badge { display: flex; gap: 2px; justify-content: center; }
-.drum-reach-badge .reach-l, .drum-reach-badge .reach-r {
-  font-size: 8px; font-weight: 700; width: 14px; height: 14px; line-height: 14px;
-  text-align: center; border-radius: 3px;
-}
-.drum-reach-badge .ok  { background: #3ecf6e; color: #0b0b14; }
-.drum-reach-badge .bad { background: #e04040; color: #fff; }
 .drum-type-sel, .drum-arm-sel {
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -581,28 +573,6 @@ body {
   height: 1px;
   background: rgba(255,255,255,0.07);
   pointer-events: none;
-}
-/* 현재 드럼 위치 기준 해당 절반(팔)이 자연스럽게 닿지 않으면 붉게 음영
-   — 드래그로 비트 찍기 전에 시각적으로 바로 알 수 있게 한다. */
-.tl-lane.split.half-l-unreachable {
-  background-image: repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px);
-  background-size: 100% 50%;
-  background-position: top left;
-  background-repeat: no-repeat;
-}
-.tl-lane.split.half-r-unreachable {
-  background-image: repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px);
-  background-size: 100% 50%;
-  background-position: bottom left;
-  background-repeat: no-repeat;
-}
-.tl-lane.split.half-l-unreachable.half-r-unreachable {
-  background-image:
-    repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px),
-    repeating-linear-gradient(135deg, rgba(224,64,64,0.16) 0 6px, rgba(224,64,64,0.06) 6px 12px);
-  background-size: 100% 50%, 100% 50%;
-  background-position: top left, bottom left;
-  background-repeat: no-repeat, no-repeat;
 }
 .tl-grid-line {
   position: absolute;
