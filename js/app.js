@@ -2364,23 +2364,29 @@ function buildKeyframes() {
         const raiseBT   = parseFloat((next.t - raiseLead).toFixed(3));
 
         if (useNeutralHold) {
-          // 중립 자세로 대기하다가, 타격 직전 짧게 peak(팔꿈치 리프트 +
-          // 중심선 안전 여유가 적용된 경유 자세)를 거쳐 raise(B)로 스냅한다.
+          // 중립 자세로 대기하다가 raise(B)로 스냅한다.
+          // 예전엔 스냅 구간에 peak(평균 경유 자세)를 한 번 더 거쳐서
+          // "중립→peak→raise(B)" 두 단계로 꺾였는데, 이게 바로 사용자가
+          // 지적한 "Y자가 누워있는" 모양의 원인이었다 — 위로 들었다가
+          // (중립) 한 번 더 방향을 트는(peak) 구간이 생겨 궤적이 두 번
+          // 꺾인 것. peak 경유를 생략하고 중립에서 곧장 raise(B)로 가면
+          // catmull-rom이 한 번에 자연스러운 호를 그린다(사용자 제안:
+          // "최상단에서 다음 타격 쪽으로 각도를 가져가면 Y자가 사라진다").
           // 스냅 구간을 preDur의 절반 정도로 짧게 잡아야 catmull-rom 보간이
           // (다음 키프레임의 큰 변화를 미리 반영해) 중립 홀드 구간까지 앞당겨
-          // 서서히 움직이기 시작하는 것을 최소화한다 — 너무 넓게 잡으면
-          // 스냅 시작 훨씬 전부터 이미 다음 타격 쪽으로 미세하게 새기 시작한다.
+          // 서서히 움직이기 시작하는 것을 최소화한다.
           const snapT = parseFloat(Math.max(peakT, raiseBT - preDur * 0.4).toFixed(3));
           // addBreathingHold는 홀드 구간이 BREATH_HALF(0.9초)보다 짧으면 점을
           // 하나도 안 찍는다 — 그러면 홀드 구간에 점이 peakT 하나뿐이라
-          // catmull-rom이 앞뒤(타격 자세·peak 자세)의 큰 변화를 반영해 접선을
-          // 기울여서, 홀드 구간 내내 서서히 움직이는 것처럼 보인다(실측 확인).
-          // 홀드 구간 중간에 같은 자세를 한 번 더 찍어 접선을 평평하게 고정한다.
+          // catmull-rom이 앞뒤(타격 자세·raise(B) 자세)의 큰 변화를 반영해
+          // 접선을 기울여서, 홀드 구간 내내 서서히 움직이는 것처럼 보인다
+          // (실측 확인). 홀드 구간 중간에 같은 자세를 한 번 더 찍어 접선을
+          // 평평하게 고정한다.
           if (snapT > peakT) {
             const midT = parseFloat(((peakT + snapT) / 2).toFixed(3));
             if (midT > peakT && midT < snapT) addPose(poseMap, midT, preLift[arm], sideKeys);
             addBreathingHold(poseMap, preLift[arm], peakT, snapT, sideKeys);
-            addPose(poseMap, snapT, peak, sideKeys);
+            addPose(poseMap, snapT, preLift[arm], sideKeys);
           }
         } else {
           // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 남으면 그 사이는
