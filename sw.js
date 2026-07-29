@@ -29,10 +29,15 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  // clients.claim()을 쓰지 않는다 — 그걸 쓰면 등록 중인 "지금 이 페이지"의
+  // 이미 진행 중이던 요청(메시 등)까지 SW가 즉시 가로채면서 경합이 생겨
+  // 최초 방문 시 페이지 초기화가 멈추는 문제가 있었다(재현·확인함).
+  // claim() 없이는 SW가 다음 새로고침부터 제어하므로, 캐시 이득은 그대로
+  // 유지되면서 첫 로드는 항상 평범한 네트워크 로드로 안전하게 끝난다.
   event.waitUntil(
     caches.keys().then((names) => Promise.all(
       names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n))
-    )).then(() => self.clients.claim())
+    ))
   );
 });
 
