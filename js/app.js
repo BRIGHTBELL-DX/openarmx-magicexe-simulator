@@ -2599,7 +2599,13 @@ window.exportProject = function () {
     version: 1,
     savedAt: new Date().toISOString(),
     drumKit: drumKit.map(d => ({ id: d.id, name: d.name, type: d.type, arm: d.arm, pos: { x: d.pos.x, y: d.pos.y, z: d.pos.z } })),
-    timelineEvents: timelineEvents.map(e => ({ drumId: e.drumId, beat: e.beat, vel: e.vel ?? 'medium', arm: e.arm })),
+    // 퍼포먼스 이벤트(type:'perf')는 drumId가 없는 별도 모양이라 드럼
+    // 타격과 같은 필드로 매핑하면 유실된다 — type별로 분기해서 저장.
+    timelineEvents: timelineEvents.map(e =>
+      e.type === 'perf'
+        ? { type: 'perf', presetId: e.presetId, beat: e.beat, bars: e.bars }
+        : { drumId: e.drumId, beat: e.beat, vel: e.vel ?? 'medium', arm: e.arm }
+    ),
     settings: {
       bpm, beatsPerBar, totalBars,
       introChecked: document.getElementById('chk-intro')?.checked ?? true,
@@ -2638,12 +2644,16 @@ window.importProject = function (input) {
       );
 
       if (Array.isArray(data.timelineEvents)) {
-        timelineEvents = data.timelineEvents.map(ev => ({
-          drumId: ev.drumId,
-          beat: +ev.beat,
-          vel: ev.vel ?? 'medium',
-          ...((ev.arm === 'L' || ev.arm === 'R') ? { arm: ev.arm } : {}),
-        }));
+        timelineEvents = data.timelineEvents.map(ev =>
+          ev.type === 'perf'
+            ? { type: 'perf', presetId: ev.presetId, beat: +ev.beat, bars: +ev.bars || 1 }
+            : {
+                drumId: ev.drumId,
+                beat: +ev.beat,
+                vel: ev.vel ?? 'medium',
+                ...((ev.arm === 'L' || ev.arm === 'R') ? { arm: ev.arm } : {}),
+              }
+        );
       }
 
       const s = data.settings;
