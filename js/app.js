@@ -4533,7 +4533,12 @@ function _laneGridFragment(div) {
  * 주지 말고 상단에 필터 형식으로 표출하면 UI 전환 없이 볼 수 있을 것
  * 같다"에 따라 한 패널 안에서 필터만 바꾸는 방식으로 변경. 요청한 마디
  * 수보다 짧은 variants만 있는 클립은 가장 가까운(작은) 마디로 자동
- * 대체되므로(_clipKeysForBars), 그 경우 실제 적용 마디를 표시한다. */
+ * 대체되므로(_clipKeysForBars), 그 경우 실제 적용 마디를 표시한다.
+ *
+ * 마지막으로 선택한 마디 필터는 모듈 스코프 변수(_perfMenuLastBars)에
+ * 기억해뒀다가 다음에 메뉴를 열 때도 그대로 유지한다 — 사용자 지적:
+ * "3마디로 해놨는데 다시 누르면 1마디로 돌아간다". */
+let _perfMenuLastBars = 1;
 function _showPerfClipMenu(x, y, onPick) {
   document.querySelectorAll('.tl-perf-menu').forEach(m => m.remove());
   const menu = document.createElement('div');
@@ -4542,7 +4547,7 @@ function _showPerfClipMenu(x, y, onPick) {
   menu.style.top  = y + 'px';
   document.body.appendChild(menu);
 
-  let selectedBars = 1;
+  let selectedBars = _perfMenuLastBars;
 
   function placeInViewport() {
     menu.style.left = x + 'px';
@@ -4580,7 +4585,7 @@ function _showPerfClipMenu(x, y, onPick) {
   menu.addEventListener('click', e => {
     const filterItem = e.target.closest('.tl-perf-menu-filter-item');
     if (filterItem) {
-      selectedBars = parseInt(filterItem.dataset.bars, 10) || 1;
+      selectedBars = _perfMenuLastBars = parseInt(filterItem.dataset.bars, 10) || 1;
       render();
       return;
     }
