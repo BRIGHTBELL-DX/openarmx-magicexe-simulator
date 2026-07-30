@@ -4612,17 +4612,29 @@ function _buildPerfLane(totalW, div, totalBeats) {
   lane.style.width = totalW + 'px';
   lane.appendChild(_laneGridFragment(div));
 
+  function beatFromEvent(e) {
+    const rect = lane.getBoundingClientRect();
+    const rawX = e.clientX - rect.left;
+    let beat = rawX / PX_PER_BEAT + 1;
+    if (document.getElementById('chk-snap')?.checked) {
+      const snapUnit = 4 / div;
+      beat = Math.round(beat / snapUnit) * snapUnit;
+    }
+    return parseFloat(clamp(beat, 1, totalBeats + 1).toFixed(4));
+  }
+
   timelineEvents.forEach(evt => {
     if (evt.type !== 'perf') return;
     const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[evt.presetId] : null;
     const bars = clip ? _clipKeysForBars(clip, evt.bars).bars : Math.max(1, evt.bars || 1);
+    const blockBeats = bars * beatsPerBar;
     const startBeat = evt.beat;
-    const endBeat   = startBeat + bars * beatsPerBar;
+    const endBeat   = startBeat + blockBeats;
     const block = document.createElement('div');
     block.className   = 'tl-perf-block';
     block.style.left  = ((startBeat - 1) * PX_PER_BEAT) + 'px';
     block.style.width = Math.max(4, (endBeat - startBeat) * PX_PER_BEAT - 2) + 'px';
-    block.title = clip ? clip.desc : `알 수 없는 클립(${evt.presetId})`;
+    block.title = (clip ? clip.desc : `알 수 없는 클립(${evt.presetId})`) + ' (드래그로 위치 이동 가능)';
     block.innerHTML =
       `<span class="tl-perf-block-name">${clip ? clip.name : '?'}</span>` +
       `<button class="tl-perf-block-del" title="삭제">✕</button>`;
@@ -4635,6 +4647,7 @@ function _buildPerfLane(totalW, div, totalBeats) {
     });
     block.addEventListener('click', e => {
       e.stopPropagation();
+      if (performance.now() < _tlDragSuppressClickUntil) return; // 드래그 직후 트레일링 클릭 무시
       _showPerfClipMenu(e.clientX, e.clientY, (presetId, pickedBars) => {
         evt.presetId = presetId;
         evt.bars = pickedBars;
@@ -4642,19 +4655,42 @@ function _buildPerfLane(totalW, div, totalBeats) {
         saveTimeline();
       });
     });
+    // 드래그로 블록 위치(마디) 이동 — 사용자 피드백: "위치를 변경하거나
+    // 연결하려고 하는데 UX가 부족하다". 클릭(자세 변경 메뉴)·삭제 버튼과
+    // 겹치지 않도록, 실제로 일정 거리 이상 움직였을 때만 드래그로 간주하고
+    // 그 경우 뒤이은 click을 억제한다(다른 드래그와 동일한 패턴).
+    block.addEventListener('mousedown', e => {
+      if (e.button !== 0 || e.target.closest('.tl-perf-block-del')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startX     = e.clientX;
+      const dragBars   = blockBeats;
+      const maxBeat    = Math.max(1, totalBeats + 1 - dragBars);
+      let moved = false;
+      function onMove(me) {
+        const dx = me.clientX - startX;
+        if (Math.abs(dx) > 3) moved = true;
+        let newBeat = beatFromEvent(me);
+        newBeat = clamp(newBeat, 1, maxBeat);
+        if (newBeat !== evt.beat) {
+          evt.beat = newBeat;
+          block.style.left = ((evt.beat - 1) * PX_PER_BEAT) + 'px';
+        }
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        if (moved) {
+          _tlDragSuppressClickUntil = performance.now() + 300;
+          renderTimeline();
+          saveTimeline();
+        }
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
     lane.appendChild(block);
   });
-
-  function beatFromEvent(e) {
-    const rect = lane.getBoundingClientRect();
-    const rawX = e.clientX - rect.left;
-    let beat = rawX / PX_PER_BEAT + 1;
-    if (document.getElementById('chk-snap')?.checked) {
-      const snapUnit = 4 / div;
-      beat = Math.round(beat / snapUnit) * snapUnit;
-    }
-    return parseFloat(clamp(beat, 1, totalBeats + 1).toFixed(4));
-  }
 
   lane.addEventListener('click', e => {
     if (e.target.closest('.tl-perf-block')) return;
