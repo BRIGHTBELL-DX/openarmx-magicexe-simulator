@@ -2392,6 +2392,17 @@ function buildKeyframes() {
         if (raiseLead > 0.03 && raiseBT > peakT) {
           addPose(poseMap, raiseBT, posB, sideKeys);
         }
+      } else {
+        // 이 팔의 마지막 타격 이후(아웃트로 전까지) — rebound에서 멈춘 채로
+        // 곡 끝까지 그대로 두면 catmull-rom이 rebound→READY(totalTime) 사이를
+        // 한 번에 부드럽게(숨쉬기 없이) 보간해, 대기 구간 내내 서서히 자세가
+        // 바뀌는 것처럼 보인다(다른 대기 구간엔 이미 숨쉬기가 들어가 있는데
+        // 여기만 빠져 있었음). 다른 대기 구간과 동일하게 숨쉬기를 채운다.
+        const holdEndT = parseFloat(Math.max(reboundT, totalTime - APPROACH_DUR).toFixed(3));
+        if (holdEndT > reboundT) {
+          addBreathingHold(poseMap, preLift[arm], reboundT, holdEndT, sideKeys);
+          addPose(poseMap, holdEndT, preLift[arm], sideKeys);
+        }
       }
     });
   });
