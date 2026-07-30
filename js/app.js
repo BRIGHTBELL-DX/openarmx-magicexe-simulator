@@ -5035,6 +5035,82 @@ window.previewDrumHit = function (drumId, vel = 'medium') {
 };
 
 // ═══════════════════════════════════════════════════════════════
+//  퍼포먼스 클립 미리보기 (v2 재작업 — 4개 시안 확인용)
+//  타임라인/이벤트 모델과는 아직 분리된 임시 미리보기 통로. previewDrumHit
+//  과 동일하게 _playKFs/isPlaying 등 재생 상태를 건드리지 않고 독립적인
+//  setInterval로 구동해, 정식 타임라인 재생과 절대 섞이지 않는다.
+// ═══════════════════════════════════════════════════════════════
+let _perfPreviewTimer = null;
+
+window.previewPerfClip = function (clipId) {
+  if (_perfPreviewTimer) { clearInterval(_perfPreviewTimer); _perfPreviewTimer = null; }
+  const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[clipId] : null;
+  if (!clip) { setStatus(`퍼포먼스 클립 없음: ${clipId}`); return; }
+
+  const bars     = Math.max(1, clip.bars || 1);
+  const duration = bars * beatsPerBar * (60 / bpm);
+  const keys     = clip.keys.slice().sort((a, b) => a.at - b.at);
+  const KEYS14   = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
+  const poseObj  = arr => { const o = {}; KEYS14.forEach((k, i) => { o[k] = arr[i] ?? 0; }); return o; };
+
+  if (!_trailOn) { _trailOn = true; document.getElementById('btn-trail')?.classList.add('on'); }
+  clearTCPTrails();
+  setStatus(`퍼포먼스 미리보기: ${clip.name} (${duration.toFixed(2)}s)`);
+
+  let segIdx = 0;
+  let segT0  = performance.now();
+
+  _perfPreviewTimer = setInterval(() => {
+    if (segIdx >= keys.length - 1) {
+      clearInterval(_perfPreviewTimer);
+      _perfPreviewTimer = null;
+      updateFK({ ...NEUTRAL });
+      setStatus(`퍼포먼스 미리보기 종료: ${clip.name}`);
+      return;
+    }
+    const kA = keys[segIdx], kB = keys[segIdx + 1];
+    const segDur = Math.max(0.001, (kB.at - kA.at) * duration);
+    const from = poseObj(kA.pose), to = poseObj(kB.pose);
+    const elapsed = performance.now() - segT0;
+    const t  = Math.min(1, elapsed / (segDur * 1000));
+    const st = smoothStep(t);
+
+    const cur = { L_grip: 0, R_grip: 0 };
+    KEYS14.forEach(k => { cur[k] = (from[k] ?? 0) + ((to[k] ?? 0) - (from[k] ?? 0)) * st; });
+    updateFK(cur);
+
+    ['L', 'R'].forEach(arm => { _trailData[arm].lastUpd = 0; });
+    const wasPlaying = isPlaying; isPlaying = true;
+    updateTCPTrails();
+    isPlaying = wasPlaying;
+
+    if (t >= 1) { segIdx++; segT0 = performance.now(); }
+  }, 16);
+};
+
+/** 실시간 재생 없이 특정 진행률(0~1)의 포즈를 즉시 반영 — 검증·스크린샷용.
+ *  setInterval 기반 미리보기는 탭이 백그라운드로 처리되면 쓰로틀링돼
+ *  멈춘 것처럼 보일 수 있어, 확인용으로는 이 동기 버전을 쓴다. */
+window.previewPerfClipAt = function (clipId, at) {
+  const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[clipId] : null;
+  if (!clip) { setStatus(`퍼포먼스 클립 없음: ${clipId}`); return 'no such clip'; }
+  const keys   = clip.keys.slice().sort((a, b) => a.at - b.at);
+  const KEYS14 = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
+  const poseObj = arr => { const o = {}; KEYS14.forEach((k, i) => { o[k] = arr[i] ?? 0; }); return o; };
+  const clamped = Math.min(1, Math.max(0, at));
+  let i = 0;
+  while (i < keys.length - 2 && keys[i + 1].at <= clamped) i++;
+  const kA = keys[i], kB = keys[Math.min(i + 1, keys.length - 1)];
+  const span = Math.max(1e-6, kB.at - kA.at);
+  const st = smoothStep(Math.min(1, Math.max(0, (clamped - kA.at) / span)));
+  const from = poseObj(kA.pose), to = poseObj(kB.pose);
+  const cur = { L_grip: 0, R_grip: 0 };
+  KEYS14.forEach(k => { cur[k] = (from[k] ?? 0) + ((to[k] ?? 0) - (from[k] ?? 0)) * st; });
+  updateFK(cur);
+  return `${clip.name} @ at=${clamped}`;
+};
+
+// ═══════════════════════════════════════════════════════════════
 //  씬 팔레트 (배경·팔·몸체 컬러 변경)
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
