@@ -5435,6 +5435,17 @@ window.checkClipDrumClearance = function (clipId, bars, minClearance = 0.12, sam
   return results.sort((a, b) => a.minDist - b.minDist);
 };
 
+/** 특정 포즈(14값 배열)에서 스틱 팁의 월드 좌표(URDF 프레임)를 바로 확인
+ *  — 스틱이 몸 안쪽/바깥쪽 중 어디를 향하는지처럼 드럼과 무관한 방향
+ *  판단에 사용. y>0은 왼쪽, y<0은 오른쪽, x는 앞쪽(몸 정면 방향). */
+window.checkPoseTip = function (poseArr14, arm) {
+  const KEYS14 = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
+  const angles = { L_grip: 0, R_grip: 0 };
+  KEYS14.forEach((k, i) => { angles[k] = poseArr14[i] ?? 0; });
+  const tip = _pureFKStick(angles, arm).tip;
+  return { x: +tip.x.toFixed(3), y: +tip.y.toFixed(3), z: +tip.z.toFixed(3) };
+};
+
 /** 실시간 재생 없이 특정 진행률(0~1)의 포즈를 즉시 반영 — 검증·스크린샷용.
  *  setInterval 기반 미리보기는 탭이 백그라운드로 처리되면 쓰로틀링돼
  *  멈춘 것처럼 보일 수 있어, 확인용으로는 이 동기 버전을 쓴다. */
