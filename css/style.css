@@ -658,7 +658,25 @@ body {
 .tl-perf-menu-item:hover { background: rgba(160,90,220,0.25); }
 .tl-perf-menu-bars { font-size: 10px; color: #8888aa; flex-shrink: 0; }
 .tl-perf-menu-cancel { color: #999; justify-content: center; margin-top: 2px; border-top: 1px solid #2a2a44; }
-.tl-perf-menu-back { color: #b89adf; justify-content: center; }
+/* 마디 수 필터 — 클립 목록 위에 고정, 클릭해도 패널 전환 없이 목록만 갱신 */
+.tl-perf-menu-filter {
+  display: flex;
+  gap: 4px;
+  padding: 2px 2px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #2a2a44;
+}
+.tl-perf-menu-filter-item {
+  flex: 1;
+  text-align: center;
+  padding: 5px 0;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #aaaacc;
+  cursor: pointer;
+}
+.tl-perf-menu-filter-item:hover { background: rgba(160,90,220,0.18); }
+.tl-perf-menu-filter-item.active { background: rgba(160,90,220,0.35); color: #fff; font-weight: 600; }
 .tl-grid-line {
   position: absolute;
   top: 0; bottom: 0;

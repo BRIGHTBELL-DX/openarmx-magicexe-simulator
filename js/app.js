@@ -4517,14 +4517,13 @@ function _laneGridFragment(div) {
  *  실제 크기를 재서 화면 밖으로 나가면 안쪽으로 당긴다(PERFORMANCE_
  *  RESTART_PROMPT.md에서 지적된 "메뉴가 화면 밖으로 잘림" 문제 대응).
  *
- * 2단계 선택 — 마디 수(1~4)를 먼저 고르고, 그 마디 수에 해당하는 동작을
- * 고르면 바로 삽입된다. 예전엔 "클립×마디" 조합을 한 평면 목록에 전부
- * 늘어놓아(예: 스틱 포인팅 1마디/2마디/3마디/4마디가 목록에 뒤섞여 나옴)
- * 원하는 마디 수를 찾기 번거로웠다 — 사용자 피드백: "1마디 2마디 혼재
- * 되어 표출되는것보다는 퍼포먼스 누르면 거기에 바로 1~4마디 선택하고
- * 그거에 해당하는 동작 나오고 그거를 누르면 삽입되는 UX가 편하지 않을까".
- * 요청한 마디 수보다 짧은 variants만 있는 클립은 가장 가까운(작은) 마디로
- * 자동 대체되므로(_clipKeysForBars), 그 경우 실제 적용 마디를 표시한다. */
+ * 상단에 마디 수(1~4) 필터를 고정 배치하고, 그 아래 클립 목록이 선택된
+ * 마디에 맞춰 그 자리에서 즉시 갱신된다 — 이전엔 "마디 선택 → 클립 목록"
+ * 2단계 화면 전환(뒤로가기 버튼 포함)이었는데, 사용자 피드백: "단계로
+ * 주지 말고 상단에 필터 형식으로 표출하면 UI 전환 없이 볼 수 있을 것
+ * 같다"에 따라 한 패널 안에서 필터만 바꾸는 방식으로 변경. 요청한 마디
+ * 수보다 짧은 variants만 있는 클립은 가장 가까운(작은) 마디로 자동
+ * 대체되므로(_clipKeysForBars), 그 경우 실제 적용 마디를 표시한다. */
 function _showPerfClipMenu(x, y, onPick) {
   document.querySelectorAll('.tl-perf-menu').forEach(m => m.remove());
   const menu = document.createElement('div');
@@ -4532,6 +4531,8 @@ function _showPerfClipMenu(x, y, onPick) {
   menu.style.left = x + 'px';
   menu.style.top  = y + 'px';
   document.body.appendChild(menu);
+
+  let selectedBars = 1;
 
   function placeInViewport() {
     menu.style.left = x + 'px';
@@ -4541,22 +4542,19 @@ function _showPerfClipMenu(x, y, onPick) {
     if (r.bottom > innerHeight) menu.style.top  = Math.max(4, innerHeight - r.height - 8) + 'px';
   }
 
-  function renderBarStep() {
-    menu.innerHTML = [1, 2, 3, 4].map(n =>
-      `<div class="tl-perf-menu-item" data-bars="${n}">${n}마디</div>`
-    ).join('') + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 취소</div>`;
-    placeInViewport();
-  }
-
-  function renderClipStep(wantBars) {
+  function render() {
     const clips = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS : {};
-    menu.innerHTML = Object.entries(clips).map(([id, c]) => {
-      const { bars } = _clipKeysForBars(c, wantBars);
-      const note = bars !== wantBars ? ` (${bars}마디로 대체)` : '';
+    const filterHtml = `<div class="tl-perf-menu-filter">${[1, 2, 3, 4].map(n =>
+      `<div class="tl-perf-menu-filter-item${n === selectedBars ? ' active' : ''}" data-bars="${n}">${n}마디</div>`
+    ).join('')}</div>`;
+    const listHtml = Object.entries(clips).map(([id, c]) => {
+      const { bars } = _clipKeysForBars(c, selectedBars);
+      const note = bars !== selectedBars ? ` (${bars}마디로 대체)` : '';
       return `<div class="tl-perf-menu-item" data-id="${id}" data-bars="${bars}" title="${c.desc || ''}">
                 <span>${c.name}${note}</span><span class="tl-perf-menu-bars">${bars}마디</span>
               </div>`;
-    }).join('') + `<div class="tl-perf-menu-item tl-perf-menu-back">‹ 마디 다시 선택</div>`
+    }).join('');
+    menu.innerHTML = filterHtml + listHtml
       + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 취소</div>`;
     placeInViewport();
   }
@@ -4570,22 +4568,24 @@ function _showPerfClipMenu(x, y, onPick) {
   }
   menu.addEventListener('mousedown', e => e.stopPropagation());
   menu.addEventListener('click', e => {
+    const filterItem = e.target.closest('.tl-perf-menu-filter-item');
+    if (filterItem) {
+      selectedBars = parseInt(filterItem.dataset.bars, 10) || 1;
+      render();
+      return;
+    }
     const item = e.target.closest('.tl-perf-menu-item');
     if (!item) return;
     if (item.classList.contains('tl-perf-menu-cancel')) { cleanup(); return; }
-    if (item.classList.contains('tl-perf-menu-back')) { renderBarStep(); return; }
     if (item.dataset.id) {
       cleanup();
       onPick(item.dataset.id, parseInt(item.dataset.bars, 10) || 1);
-      return;
     }
-    // 마디 수 선택 단계 — 해당 마디에 맞는 클립 목록으로 전환.
-    renderClipStep(parseInt(item.dataset.bars, 10) || 1);
   });
   // 지금 이 클릭 자체가 document에 버블링돼 바로 닫히지 않도록 한 틱 미룬다.
   setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
 
-  renderBarStep();
+  render();
 }
 
 /** 퍼포먼스 레인 — 팔 구분 없이 한 줄, 클릭으로 새 구간 생성 또는
