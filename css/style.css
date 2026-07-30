@@ -1,7 +1,7 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 :root {
   --hdr:   50px;
-  --tl-h:  404px;
+  --tl-h:  440px;  /* 404px + 퍼포먼스 레인 1개(36px) */
   --panel-w: 680px;
   --bg:    #08080e;
   --bg2:   #0d0d1e;
@@ -574,6 +574,73 @@ body {
   background: rgba(255,255,255,0.07);
   pointer-events: none;
 }
+
+/* ── 퍼포먼스 트랙(드럼을 안 치는 구간의 연출 동작) ── */
+.tl-perf-label { color: #bb66ff !important; }
+.tl-perf-lane {
+  background: rgba(120,60,180,0.06);
+  border-bottom: 2px solid #4a2a66;
+}
+.tl-perf-block {
+  position: absolute;
+  top: 3px;
+  height: 30px;
+  background: rgba(160,90,220,0.28);
+  border: 1px solid #a860e0;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #e8d4ff;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.tl-perf-block:hover { background: rgba(160,90,220,0.42); }
+.tl-perf-block-name { overflow: hidden; text-overflow: ellipsis; }
+.tl-perf-block-del {
+  background: none;
+  border: none;
+  color: #d8bbff;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 0 0 4px;
+  flex-shrink: 0;
+}
+.tl-perf-block-del:hover { color: #ff6666; }
+
+/* 퍼포먼스 클립 선택 메뉴 — position:fixed로 클릭 좌표에 얹되, JS에서
+   getBoundingClientRect()로 화면 경계를 확인해 안쪽으로 당긴다(그냥
+   좌표에만 얹으면 화면 아래·오른쪽 근처 클릭 시 메뉴가 잘린다). */
+.tl-perf-menu {
+  position: fixed;
+  z-index: 200;
+  background: #16162a;
+  border: 1px solid #4a2a66;
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 180px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+}
+.tl-perf-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.tl-perf-menu-item:hover { background: rgba(160,90,220,0.25); }
+.tl-perf-menu-bars { font-size: 10px; color: #8888aa; flex-shrink: 0; }
+.tl-perf-menu-cancel { color: #999; justify-content: center; margin-top: 2px; border-top: 1px solid #2a2a44; }
 .tl-grid-line {
   position: absolute;
   top: 0; bottom: 0;

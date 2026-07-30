@@ -2150,15 +2150,32 @@ function buildKeyframes() {
   L_poseMap.set('0.000', { ...preLift.L });
   R_poseMap.set('0.000', { ...preLift.R });
 
+  // ── 퍼포먼스 구간(초 단위) ────────────────────────────────────
+  // 타격 이벤트가 이 구간 안에 들어가면 무시하고, 두 타격 사이에 이
+  // 구간이 끼어 있으면 경유점(via-point) 체인을 끊는다(퍼포먼스 동작
+  // 위에 타격 경유점이 겹쳐 그려지며 관절이 튀는 것 방지).
+  const perfSpans = timelineEvents
+    .filter(e => e.type === 'perf' && typeof PERFORMANCE_CLIPS !== 'undefined' && PERFORMANCE_CLIPS[e.presetId])
+    .map(e => {
+      const clip  = PERFORMANCE_CLIPS[e.presetId];
+      const bars  = Math.max(1, e.bars || clip.bars || 1);
+      const start = parseFloat(((e.beat - 1) * beatDur).toFixed(3));
+      return { evt: e, clip, start, end: parseFloat((start + bars * beatsPerBar * beatDur).toFixed(3)) };
+    });
+  const _tInsidePerf = t => perfSpans.some(sp => t >= sp.start && t < sp.end);
+  const _perfBetween = (tA, tB) => perfSpans.some(sp => sp.start >= tA && sp.start < tB);
+
   // 팔별 이벤트를 시간순 정렬 — rebound/raise 겹침 감지에 필요
   // evt.arm이 있으면(팔 오버라이드) 드럼의 원래 팔 대신 그 팔로 그룹핑한다.
   const armEvts = { L: [], R: [] };
   timelineEvents.forEach(evt => {
+    if (evt.type === 'perf') return;
     const rawDrum = drumKit.find(d => d.id === evt.drumId);
     if (!rawDrum || rawDrum.type === 'kick') return;
     const effArm = evt.arm ?? rawDrum.arm;
     const drum   = effArm === rawDrum.arm ? rawDrum : { ...rawDrum, arm: effArm };
     const t = parseFloat(((evt.beat - 1) * beatDur).toFixed(3));
+    if (_tInsidePerf(t)) return;   // 퍼포먼스 구간과 겹치는 타격은 무시
     armEvts[effArm].push({ drum, t, vel: evt.vel ?? 'medium' });
   });
   armEvts.L.sort((a, b) => a.t - b.t);
@@ -2195,11 +2212,19 @@ function buildKeyframes() {
 
     armEvts[arm].forEach(({ drum, t, vel }, idx) => {
       const typeInfo = DRUM_TYPES[drum.type];
-      const hasPrev  = idx > 0;  // 이전 타격이 있으면 raise 생략 → via-point가 대체
+      // 이전 타격이 있어도 그 사이에 퍼포먼스 구간이 끼어 있으면 체인이
+      // 끊긴 것 — 이 타격은 (퍼포먼스가 끝난 뒤) 새로 raise부터 시작해야
+      // 한다(hasPrev=false 취급).
+      const prevEvt  = armEvts[arm][idx - 1];
+      const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t);
       const raiseT   = parseFloat(Math.max(0.001, t - preDur).toFixed(3));
       const reboundT = parseFloat((t + typeInfo.rebDur).toFixed(3));
 
-      const next = armEvts[arm][idx + 1];
+      const rawNext = armEvts[arm][idx + 1];
+      // 다음 타격과의 사이에 퍼포먼스 구간이 끼어 있으면 경유점(via-point)
+      // 체인으로 잇지 않는다 — 이 타격이 (퍼포먼스 전) 마지막 타격인 것처럼
+      // rebound 후 대기하다가 퍼포먼스로 넘어가야 한다.
+      const next = (rawNext && !_perfBetween(t, rawNext.t)) ? rawNext : null;
 
       // 다음 타격이 있으면 rebound 생략 — rebound가 현재 드럼 바로 위로 팔을 들어
       // strike → rebound → via-point 순서가 되면 ㄷ자 경로가 됨.
@@ -2393,17 +2418,46 @@ function buildKeyframes() {
           addPose(poseMap, raiseBT, posB, sideKeys);
         }
       } else {
-        // 이 팔의 마지막 타격 이후(아웃트로 전까지) — rebound에서 멈춘 채로
-        // 곡 끝까지 그대로 두면 catmull-rom이 rebound→READY(totalTime) 사이를
-        // 한 번에 부드럽게(숨쉬기 없이) 보간해, 대기 구간 내내 서서히 자세가
-        // 바뀌는 것처럼 보인다(다른 대기 구간엔 이미 숨쉬기가 들어가 있는데
-        // 여기만 빠져 있었음). 다른 대기 구간과 동일하게 숨쉬기를 채운다.
-        const holdEndT = parseFloat(Math.max(reboundT, totalTime - APPROACH_DUR).toFixed(3));
+        // 이 팔의 마지막 타격 이후 — rebound에서 멈춘 채로 그대로 두면
+        // catmull-rom이 rebound→READY 사이를 한 번에 부드럽게(숨쉬기 없이)
+        // 보간해, 대기 구간 내내 서서히 자세가 바뀌는 것처럼 보인다(다른
+        // 대기 구간엔 이미 숨쉬기가 들어가 있는데 여기만 빠져 있었음).
+        // 다른 대기 구간과 동일하게 숨쉬기를 채운다.
+        //
+        // 단, 이게 "곡 끝"이 아니라 "퍼포먼스 구간 직전"이라면(rawNext는
+        // 있지만 체인이 끊긴 경우) 대기를 곡 끝(totalTime)까지가 아니라
+        // 그 퍼포먼스가 시작하기 전까지만 채워야 한다 — 안 그러면 대기
+        // 홀드가 퍼포먼스 시작 이후 시각까지 키프레임을 찍어 순서가
+        // 뒤섞인다(퍼포먼스 자체 키프레임은 이 뒤에서 별도로 채워짐).
+        const nextPerfStart = perfSpans
+          .filter(sp => sp.start >= t)
+          .reduce((min, sp) => Math.min(min, sp.start), Infinity);
+        const cap = Math.min(totalTime - APPROACH_DUR, nextPerfStart - APPROACH_DUR);
+        const holdEndT = parseFloat(Math.max(reboundT, cap).toFixed(3));
         if (holdEndT > reboundT) {
           addBreathingHold(poseMap, preLift[arm], reboundT, holdEndT, sideKeys);
           addPose(poseMap, holdEndT, preLift[arm], sideKeys);
         }
       }
+    });
+  });
+
+  // ── 퍼포먼스 클립 자체의 키프레임 주입 ────────────────────────
+  // 퍼포먼스는 IK로 드럼을 겨냥하는 게 아니라 양팔 포즈를 직접 지정하는
+  // 연출 동작이라, clip.keys(0~1 정규화 시각)를 절대 시간으로 바꿔 L/R
+  // 양쪽 poseMap에 그대로 찍는다. 위에서 이미 hasPrev/next 계산 시 이
+  // 구간을 피해가도록(perfSpans) 타격 체인을 끊어뒀으므로, 여기서 찍는
+  // 포즈와 타격 경유점이 같은 시간대에 겹칠 일은 없다.
+  perfSpans.forEach(({ evt, clip, start }) => {
+    const bars     = Math.max(1, evt.bars || clip.bars || 1);
+    const duration = bars * beatsPerBar * beatDur;
+    if (!Array.isArray(clip.keys) || !clip.keys.length || duration <= 0) return;
+    clip.keys.slice().sort((a, b) => a.at - b.at).forEach(k => {
+      const time = parseFloat((start + duration * Math.min(1, Math.max(0, k.at))).toFixed(3));
+      const lPose = {}; L_KEYS.forEach((key, i) => { lPose[key] = k.pose[i] ?? 0; });
+      const rPose = {}; R_KEYS.forEach((key, i) => { rPose[key] = k.pose[7 + i] ?? 0; });
+      addPose(L_poseMap, time, lPose, L_KEYS);
+      addPose(R_poseMap, time, rPose, R_KEYS);
     });
   });
 
@@ -4438,6 +4492,118 @@ function _laneGridFragment(div) {
   return _gridTpl.cloneNode(true);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  퍼포먼스 트랙 (드럼을 안 치는 구간에 넣는 연출 동작)
+// ═══════════════════════════════════════════════════════════════
+
+/** 퍼포먼스 클립 선택 메뉴 — position:fixed로 클릭 좌표에 얹은 뒤,
+ *  실제 크기를 재서 화면 밖으로 나가면 안쪽으로 당긴다(PERFORMANCE_
+ *  RESTART_PROMPT.md에서 지적된 "메뉴가 화면 밖으로 잘림" 문제 대응). */
+function _showPerfClipMenu(x, y, onPick) {
+  document.querySelectorAll('.tl-perf-menu').forEach(m => m.remove());
+  const list = typeof PERFORMANCE_CLIP_LIST !== 'undefined' ? PERFORMANCE_CLIP_LIST : [];
+  const menu = document.createElement('div');
+  menu.className = 'tl-perf-menu';
+  menu.innerHTML = list.map(c =>
+    `<div class="tl-perf-menu-item" data-id="${c.id}" title="${c.desc || ''}">
+       <span>${c.name}</span><span class="tl-perf-menu-bars">${c.bars}마디</span>
+     </div>`
+  ).join('') + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 취소</div>`;
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+  document.body.appendChild(menu);
+
+  const r = menu.getBoundingClientRect();
+  if (r.right  > innerWidth)  menu.style.left = Math.max(4, innerWidth  - r.width  - 8) + 'px';
+  if (r.bottom > innerHeight) menu.style.top  = Math.max(4, innerHeight - r.height - 8) + 'px';
+
+  function cleanup() {
+    menu.remove();
+    document.removeEventListener('mousedown', onDocClick, true);
+  }
+  function onDocClick(e) {
+    if (!menu.contains(e.target)) cleanup();
+  }
+  menu.addEventListener('mousedown', e => e.stopPropagation());
+  menu.addEventListener('click', e => {
+    const item = e.target.closest('.tl-perf-menu-item');
+    if (!item) return;
+    cleanup();
+    if (item.classList.contains('tl-perf-menu-cancel')) return;
+    onPick(item.dataset.id);
+  });
+  // 지금 이 클릭 자체가 document에 버블링돼 바로 닫히지 않도록 한 틱 미룬다.
+  setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
+}
+
+/** 퍼포먼스 레인 — 팔 구분 없이 한 줄, 클릭으로 새 구간 생성 또는
+ *  기존 블록 클릭으로 클립 재선택·삭제. */
+function _buildPerfLane(totalW, div, totalBeats) {
+  const lane = document.createElement('div');
+  lane.className   = 'tl-lane tl-perf-lane';
+  lane.id          = 'tl-perf-lane';
+  lane.style.width = totalW + 'px';
+  lane.appendChild(_laneGridFragment(div));
+
+  timelineEvents.forEach(evt => {
+    if (evt.type !== 'perf') return;
+    const clip  = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[evt.presetId] : null;
+    const bars  = Math.max(1, evt.bars || clip?.bars || 1);
+    const startBeat = evt.beat;
+    const endBeat   = startBeat + bars * beatsPerBar;
+    const block = document.createElement('div');
+    block.className   = 'tl-perf-block';
+    block.style.left  = ((startBeat - 1) * PX_PER_BEAT) + 'px';
+    block.style.width = Math.max(4, (endBeat - startBeat) * PX_PER_BEAT - 2) + 'px';
+    block.title = clip ? clip.desc : `알 수 없는 클립(${evt.presetId})`;
+    block.innerHTML =
+      `<span class="tl-perf-block-name">${clip ? clip.name : '?'}</span>` +
+      `<button class="tl-perf-block-del" title="삭제">✕</button>`;
+    block.querySelector('.tl-perf-block-del').addEventListener('click', e => {
+      e.stopPropagation();
+      const idx = timelineEvents.indexOf(evt);
+      if (idx >= 0) timelineEvents.splice(idx, 1);
+      renderTimeline();
+      saveTimeline();
+    });
+    block.addEventListener('click', e => {
+      e.stopPropagation();
+      _showPerfClipMenu(e.clientX, e.clientY, presetId => {
+        evt.presetId = presetId;
+        const newClip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[presetId] : null;
+        evt.bars = newClip?.bars || 1;
+        renderTimeline();
+        saveTimeline();
+      });
+    });
+    lane.appendChild(block);
+  });
+
+  function beatFromEvent(e) {
+    const rect = lane.getBoundingClientRect();
+    const rawX = e.clientX - rect.left;
+    let beat = rawX / PX_PER_BEAT + 1;
+    if (document.getElementById('chk-snap')?.checked) {
+      const snapUnit = 4 / div;
+      beat = Math.round(beat / snapUnit) * snapUnit;
+    }
+    return parseFloat(clamp(beat, 1, totalBeats + 1).toFixed(4));
+  }
+
+  lane.addEventListener('click', e => {
+    if (e.target.closest('.tl-perf-block')) return;
+    const beat = beatFromEvent(e);
+    _showPerfClipMenu(e.clientX, e.clientY, presetId => {
+      const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[presetId] : null;
+      timelineEvents.push({ type: 'perf', presetId, beat, bars: clip?.bars || 1 });
+      renderTimeline();
+      saveTimeline();
+    });
+  });
+
+  return lane;
+}
+
 function renderTimeline() {
   _flashDirty = true;   // 키트·타입·박자 변경도 플래시 스케줄 재계산 대상
   updatePxPerBeat();
@@ -4447,6 +4613,7 @@ function renderTimeline() {
 
   const labelsEl = document.getElementById('tl-lane-labels');
   let lblHtml = '<div class="tl-lbl-ruler"></div>';
+  lblHtml += `<div class="tl-label tl-perf-label" title="드럼을 안 치는 구간에 넣는 연출 동작 — 빈 칸을 클릭해 배치">퍼포먼스</div>`;
   drumKit.forEach(drum => {
     const col = DRUM_TYPES[drum.type]?.color || '#888';
     lblHtml += `<div class="tl-label" style="color:${col}" title="${drum.name}">${drum.name}</div>`;
@@ -4507,6 +4674,8 @@ function renderTimeline() {
   const lanesEl = document.getElementById('tl-lanes');
   lanesEl.style.width = totalW + 'px';
   lanesEl.innerHTML   = '';
+
+  lanesEl.appendChild(_buildPerfLane(totalW, div, totalBeats));
 
   drumKit.forEach(drum => {
     const lane = document.createElement('div');
