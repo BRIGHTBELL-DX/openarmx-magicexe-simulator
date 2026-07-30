@@ -2157,10 +2157,10 @@ function buildKeyframes() {
   const perfSpans = timelineEvents
     .filter(e => e.type === 'perf' && typeof PERFORMANCE_CLIPS !== 'undefined' && PERFORMANCE_CLIPS[e.presetId])
     .map(e => {
-      const clip  = PERFORMANCE_CLIPS[e.presetId];
-      const bars  = Math.max(1, e.bars || clip.bars || 1);
+      const clip = PERFORMANCE_CLIPS[e.presetId];
+      const { bars, keys } = _clipKeysForBars(clip, e.bars);
       const start = parseFloat(((e.beat - 1) * beatDur).toFixed(3));
-      return { evt: e, clip, start, end: parseFloat((start + bars * beatsPerBar * beatDur).toFixed(3)) };
+      return { evt: e, clip, bars, keys, start, end: parseFloat((start + bars * beatsPerBar * beatDur).toFixed(3)) };
     });
   const _tInsidePerf = t => perfSpans.some(sp => t >= sp.start && t < sp.end);
   const _perfBetween = (tA, tB) => perfSpans.some(sp => sp.start >= tA && sp.start < tB);
@@ -2217,7 +2217,7 @@ function buildKeyframes() {
       // 한다(hasPrev=false 취급).
       const prevEvt  = armEvts[arm][idx - 1];
       const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t);
-      const raiseT   = parseFloat(Math.max(0.001, t - preDur).toFixed(3));
+      let raiseT     = parseFloat(Math.max(0.001, t - preDur).toFixed(3));
       const reboundT = parseFloat((t + typeInfo.rebDur).toFixed(3));
 
       const rawNext = armEvts[arm][idx + 1];
@@ -2233,16 +2233,37 @@ function buildKeyframes() {
       const includeRebound = !next;
 
       if (!hasPrev) {
-        const holdT = parseFloat(Math.max(0, raiseT - APPROACH_DUR).toFixed(3));
-        if (holdT > 0.001) {
-          addBreathingHold(poseMap, preLift[arm], 0, holdT, sideKeys);
+        // 이 타격 직전에 퍼포먼스가 있었다면(체인이 끊겨 hasPrev=false가
+        // 된 경우) raise 접근이 그 퍼포먼스가 끝나기 전에 시작되면 안 된다
+        // — 안 그러면 퍼포먼스 자체의 키프레임(끝 시각)보다 raise 키프레임
+        // (더 이른 시각)이 먼저인데 poseMap엔 나중에 찍혀 순서가 꼬인다
+        // (사용자 지적: "퍼포먼스 이후 타격이 될 수 있는데 갑자기 튀는
+        // 현상 없이 이어져야"). 직전 퍼포먼스 종료 시각으로 raiseT를
+        // 클램프하고, 그 경우 진짜 유휴 시간이 있을 때만 대기 홀드를 채운다.
+        const precedingPerfEnd = perfSpans
+          .filter(sp => sp.end <= t)
+          .reduce((max, sp) => Math.max(max, sp.end), 0);
+        if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
+        const holdStart = precedingPerfEnd;
+        const holdT = parseFloat(Math.max(holdStart, raiseT - APPROACH_DUR).toFixed(3));
+        if (holdT > holdStart + 0.001) {
+          addBreathingHold(poseMap, preLift[arm], holdStart, holdT, sideKeys);
           addPose(poseMap, holdT, preLift[arm], sideKeys);
         }
         addPose(poseMap, raiseT, computeStrikePose(drum, 'raise', vel), sideKeys);
       }
       addPose(poseMap, t, computeStrikePose(drum, 'strike', vel), sideKeys, true);
-      if (includeRebound) {
-        addPose(poseMap, reboundT, computeStrikePose(drum, 'rebound', vel), sideKeys);
+      // rebound 직후 바로 퍼포먼스가 이어지면(간격이 rebDur보다 좁으면)
+      // rebound 키프레임이 퍼포먼스 시작 시각보다 늦게 찍혀 순서가 꼬인다
+      // — 다음 퍼포먼스 시작 시각을 넘지 않도록 클램프한다. 아래 마지막
+      // 타격 대기(else 분기)의 holdEndT 계산도 이 클램프된 값을 그대로
+      // 이어받아야 rebound보다 이른 holdEndT가 나오는 걸 막는다.
+      const followingPerfStart = perfSpans
+        .filter(sp => sp.start >= t)
+        .reduce((min, sp) => Math.min(min, sp.start), Infinity);
+      const effectiveReboundT = parseFloat(Math.min(reboundT, followingPerfStart - 0.001).toFixed(3));
+      if (includeRebound && effectiveReboundT > t) {
+        addPose(poseMap, effectiveReboundT, computeStrikePose(drum, 'rebound', vel), sideKeys);
       }
 
       // ── via-point: raise(A)와 raise(B) 중간에서 J4 최고점 ──
@@ -2429,13 +2450,10 @@ function buildKeyframes() {
         // 그 퍼포먼스가 시작하기 전까지만 채워야 한다 — 안 그러면 대기
         // 홀드가 퍼포먼스 시작 이후 시각까지 키프레임을 찍어 순서가
         // 뒤섞인다(퍼포먼스 자체 키프레임은 이 뒤에서 별도로 채워짐).
-        const nextPerfStart = perfSpans
-          .filter(sp => sp.start >= t)
-          .reduce((min, sp) => Math.min(min, sp.start), Infinity);
-        const cap = Math.min(totalTime - APPROACH_DUR, nextPerfStart - APPROACH_DUR);
-        const holdEndT = parseFloat(Math.max(reboundT, cap).toFixed(3));
-        if (holdEndT > reboundT) {
-          addBreathingHold(poseMap, preLift[arm], reboundT, holdEndT, sideKeys);
+        const cap = Math.min(totalTime - APPROACH_DUR, followingPerfStart - APPROACH_DUR);
+        const holdEndT = parseFloat(Math.max(effectiveReboundT, cap).toFixed(3));
+        if (holdEndT > effectiveReboundT) {
+          addBreathingHold(poseMap, preLift[arm], effectiveReboundT, holdEndT, sideKeys);
           addPose(poseMap, holdEndT, preLift[arm], sideKeys);
         }
       }
@@ -2448,11 +2466,10 @@ function buildKeyframes() {
   // 양쪽 poseMap에 그대로 찍는다. 위에서 이미 hasPrev/next 계산 시 이
   // 구간을 피해가도록(perfSpans) 타격 체인을 끊어뒀으므로, 여기서 찍는
   // 포즈와 타격 경유점이 같은 시간대에 겹칠 일은 없다.
-  perfSpans.forEach(({ evt, clip, start }) => {
-    const bars     = Math.max(1, evt.bars || clip.bars || 1);
+  perfSpans.forEach(({ bars, keys, start }) => {
     const duration = bars * beatsPerBar * beatDur;
-    if (!Array.isArray(clip.keys) || !clip.keys.length || duration <= 0) return;
-    clip.keys.slice().sort((a, b) => a.at - b.at).forEach(k => {
+    if (!Array.isArray(keys) || !keys.length || duration <= 0) return;
+    keys.slice().sort((a, b) => a.at - b.at).forEach(k => {
       const time = parseFloat((start + duration * Math.min(1, Math.max(0, k.at))).toFixed(3));
       const lPose = {}; L_KEYS.forEach((key, i) => { lPose[key] = k.pose[i] ?? 0; });
       const rPose = {}; R_KEYS.forEach((key, i) => { rPose[key] = k.pose[7 + i] ?? 0; });
@@ -4498,24 +4515,51 @@ function _laneGridFragment(div) {
 
 /** 퍼포먼스 클립 선택 메뉴 — position:fixed로 클릭 좌표에 얹은 뒤,
  *  실제 크기를 재서 화면 밖으로 나가면 안쪽으로 당긴다(PERFORMANCE_
- *  RESTART_PROMPT.md에서 지적된 "메뉴가 화면 밖으로 잘림" 문제 대응). */
+ *  RESTART_PROMPT.md에서 지적된 "메뉴가 화면 밖으로 잘림" 문제 대응).
+ *
+ * 2단계 선택 — 마디 수(1~4)를 먼저 고르고, 그 마디 수에 해당하는 동작을
+ * 고르면 바로 삽입된다. 예전엔 "클립×마디" 조합을 한 평면 목록에 전부
+ * 늘어놓아(예: 스틱 포인팅 1마디/2마디/3마디/4마디가 목록에 뒤섞여 나옴)
+ * 원하는 마디 수를 찾기 번거로웠다 — 사용자 피드백: "1마디 2마디 혼재
+ * 되어 표출되는것보다는 퍼포먼스 누르면 거기에 바로 1~4마디 선택하고
+ * 그거에 해당하는 동작 나오고 그거를 누르면 삽입되는 UX가 편하지 않을까".
+ * 요청한 마디 수보다 짧은 variants만 있는 클립은 가장 가까운(작은) 마디로
+ * 자동 대체되므로(_clipKeysForBars), 그 경우 실제 적용 마디를 표시한다. */
 function _showPerfClipMenu(x, y, onPick) {
   document.querySelectorAll('.tl-perf-menu').forEach(m => m.remove());
-  const list = typeof PERFORMANCE_CLIP_LIST !== 'undefined' ? PERFORMANCE_CLIP_LIST : [];
   const menu = document.createElement('div');
   menu.className = 'tl-perf-menu';
-  menu.innerHTML = list.map(c =>
-    `<div class="tl-perf-menu-item" data-id="${c.id}" title="${c.desc || ''}">
-       <span>${c.name}</span><span class="tl-perf-menu-bars">${c.bars}마디</span>
-     </div>`
-  ).join('') + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 취소</div>`;
   menu.style.left = x + 'px';
   menu.style.top  = y + 'px';
   document.body.appendChild(menu);
 
-  const r = menu.getBoundingClientRect();
-  if (r.right  > innerWidth)  menu.style.left = Math.max(4, innerWidth  - r.width  - 8) + 'px';
-  if (r.bottom > innerHeight) menu.style.top  = Math.max(4, innerHeight - r.height - 8) + 'px';
+  function placeInViewport() {
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    const r = menu.getBoundingClientRect();
+    if (r.right  > innerWidth)  menu.style.left = Math.max(4, innerWidth  - r.width  - 8) + 'px';
+    if (r.bottom > innerHeight) menu.style.top  = Math.max(4, innerHeight - r.height - 8) + 'px';
+  }
+
+  function renderBarStep() {
+    menu.innerHTML = [1, 2, 3, 4].map(n =>
+      `<div class="tl-perf-menu-item" data-bars="${n}">${n}마디</div>`
+    ).join('') + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 취소</div>`;
+    placeInViewport();
+  }
+
+  function renderClipStep(wantBars) {
+    const clips = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS : {};
+    menu.innerHTML = Object.entries(clips).map(([id, c]) => {
+      const { bars } = _clipKeysForBars(c, wantBars);
+      const note = bars !== wantBars ? ` (${bars}마디로 대체)` : '';
+      return `<div class="tl-perf-menu-item" data-id="${id}" data-bars="${bars}" title="${c.desc || ''}">
+                <span>${c.name}${note}</span><span class="tl-perf-menu-bars">${bars}마디</span>
+              </div>`;
+    }).join('') + `<div class="tl-perf-menu-item tl-perf-menu-back">‹ 마디 다시 선택</div>`
+      + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 취소</div>`;
+    placeInViewport();
+  }
 
   function cleanup() {
     menu.remove();
@@ -4528,12 +4572,20 @@ function _showPerfClipMenu(x, y, onPick) {
   menu.addEventListener('click', e => {
     const item = e.target.closest('.tl-perf-menu-item');
     if (!item) return;
-    cleanup();
-    if (item.classList.contains('tl-perf-menu-cancel')) return;
-    onPick(item.dataset.id);
+    if (item.classList.contains('tl-perf-menu-cancel')) { cleanup(); return; }
+    if (item.classList.contains('tl-perf-menu-back')) { renderBarStep(); return; }
+    if (item.dataset.id) {
+      cleanup();
+      onPick(item.dataset.id, parseInt(item.dataset.bars, 10) || 1);
+      return;
+    }
+    // 마디 수 선택 단계 — 해당 마디에 맞는 클립 목록으로 전환.
+    renderClipStep(parseInt(item.dataset.bars, 10) || 1);
   });
   // 지금 이 클릭 자체가 document에 버블링돼 바로 닫히지 않도록 한 틱 미룬다.
   setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
+
+  renderBarStep();
 }
 
 /** 퍼포먼스 레인 — 팔 구분 없이 한 줄, 클릭으로 새 구간 생성 또는
@@ -4547,8 +4599,8 @@ function _buildPerfLane(totalW, div, totalBeats) {
 
   timelineEvents.forEach(evt => {
     if (evt.type !== 'perf') return;
-    const clip  = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[evt.presetId] : null;
-    const bars  = Math.max(1, evt.bars || clip?.bars || 1);
+    const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[evt.presetId] : null;
+    const bars = clip ? _clipKeysForBars(clip, evt.bars).bars : Math.max(1, evt.bars || 1);
     const startBeat = evt.beat;
     const endBeat   = startBeat + bars * beatsPerBar;
     const block = document.createElement('div');
@@ -4568,10 +4620,9 @@ function _buildPerfLane(totalW, div, totalBeats) {
     });
     block.addEventListener('click', e => {
       e.stopPropagation();
-      _showPerfClipMenu(e.clientX, e.clientY, presetId => {
+      _showPerfClipMenu(e.clientX, e.clientY, (presetId, pickedBars) => {
         evt.presetId = presetId;
-        const newClip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[presetId] : null;
-        evt.bars = newClip?.bars || 1;
+        evt.bars = pickedBars;
         renderTimeline();
         saveTimeline();
       });
@@ -4593,9 +4644,8 @@ function _buildPerfLane(totalW, div, totalBeats) {
   lane.addEventListener('click', e => {
     if (e.target.closest('.tl-perf-block')) return;
     const beat = beatFromEvent(e);
-    _showPerfClipMenu(e.clientX, e.clientY, presetId => {
-      const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[presetId] : null;
-      timelineEvents.push({ type: 'perf', presetId, beat, bars: clip?.bars || 1 });
+    _showPerfClipMenu(e.clientX, e.clientY, (presetId, pickedBars) => {
+      timelineEvents.push({ type: 'perf', presetId, beat, bars: pickedBars });
       renderTimeline();
       saveTimeline();
     });
@@ -4686,6 +4736,17 @@ function renderTimeline() {
     const typeInfo = DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
 
     lane.appendChild(_laneGridFragment(div));
+
+    // 퍼포먼스가 점유한 구간은 이 레인에서도 시각적으로 비활성 표시
+    // (해당 구간은 addEvent()에서 클릭해도 무시되므로 UI로도 그 사실을 알려야 함).
+    _perfOccupiedBeatRanges().forEach(r => {
+      const mask = document.createElement('div');
+      mask.className   = 'tl-perf-mask';
+      mask.style.left  = ((r.start - 1) * PX_PER_BEAT) + 'px';
+      mask.style.width = ((r.end - r.start) * PX_PER_BEAT) + 'px';
+      mask.title = '퍼포먼스 구간 — 타격 배치 불가';
+      lane.appendChild(mask);
+    });
 
     timelineEvents.filter(e => e.drumId === drum.id).forEach(evt => {
       lane.appendChild(_createHitEl(drum, evt, splitArm, typeInfo));
@@ -4833,8 +4894,27 @@ function _effArm(evt) {
   return d?.arm;
 }
 
+// 퍼포먼스가 점유한 마디 구간(beat 좌표계, 1-based) — 이 구간 동안엔
+// 드럼 타격을 넣을 수 없다(양팔이 퍼포먼스 포즈로 점유돼 있음).
+function _perfOccupiedBeatRanges() {
+  return timelineEvents
+    .filter(e => e.type === 'perf')
+    .map(e => {
+      const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[e.presetId] : null;
+      const bars = clip ? _clipKeysForBars(clip, e.bars).bars : Math.max(1, e.bars || 1);
+      return { start: e.beat, end: e.beat + bars * beatsPerBar };
+    });
+}
+function _isBeatInPerf(beat) {
+  return _perfOccupiedBeatRanges().some(r => beat >= r.start && beat < r.end);
+}
+
 // arm을 명시하면(레인의 클릭된 절반) 그 팔로 배치, 생략하면 드럼 기본 팔 사용.
 function addEvent(drumId, beat, arm) {
+  // 퍼포먼스 구간에 겹치는 타격은 무시 — 그 구간의 팔 자세는 퍼포먼스가
+  // 전담하므로 드럼 타격이 끼어들면 안 된다(사용자 지적: "퍼포먼스가
+  // 삽입되면 타임라인의 드럼키트에 따라서 움직이면 안 되니까").
+  if (_isBeatInPerf(beat)) return;
   const drum = drumKit.find(d => d.id === drumId);
 
   // 킥은 팔 충돌 없음 — 토글도 드럼+박자만으로 충분(팔 개념 자체가 없음)
@@ -5211,14 +5291,14 @@ window.previewDrumHit = function (drumId, vel = 'medium') {
 // ═══════════════════════════════════════════════════════════════
 let _perfPreviewTimer = null;
 
-window.previewPerfClip = function (clipId) {
+window.previewPerfClip = function (clipId, wantBars) {
   if (_perfPreviewTimer) { clearInterval(_perfPreviewTimer); _perfPreviewTimer = null; }
   const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[clipId] : null;
   if (!clip) { setStatus(`퍼포먼스 클립 없음: ${clipId}`); return; }
 
-  const bars     = Math.max(1, clip.bars || 1);
+  const { bars, keys: rawKeys } = _clipKeysForBars(clip, wantBars);
   const duration = bars * beatsPerBar * (60 / bpm);
-  const keys     = clip.keys.slice().sort((a, b) => a.at - b.at);
+  const keys     = rawKeys.slice().sort((a, b) => a.at - b.at);
   const KEYS14   = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
   const poseObj  = arr => { const o = {}; KEYS14.forEach((k, i) => { o[k] = arr[i] ?? 0; }); return o; };
 
@@ -5264,13 +5344,104 @@ window.previewPerfClip = function (clipId) {
   }, 16);
 };
 
+/** 퍼포먼스 클립 하나를 실제 buildKeyframes()/interpolateAngles() 파이프라인
+ *  (Catmull-Rom 포함, 실제 재생과 완전히 동일한 보간)으로 돌려서 진짜
+ *  관절 속도를 잰다 — clip.keys 구간별로 "Δ각도/Δ시간"만 손으로 계산하면
+ *  Catmull-Rom이 세그먼트 중간에서 만드는 오버슈트/가속을 놓칠 수 있다
+ *  (사용자 실측 지적: "끝에 갑자기 빨라지며 끝나는 것 같다" — 손 계산과
+ *  실제 보간이 다를 수 있다는 방증). timelineEvents/totalBars를 잠깐
+ *  이 클립 하나짜리로 바꿔서 계산한 뒤 원래대로 복원한다.
+ *  반환값: 한계 대비 사용률(%) 기준 상위 5개 관절. */
+window.checkClipRealVelocity = function (clipId, bars, sampleMs = 5) {
+  const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[clipId] : null;
+  if (!clip) return 'no such clip';
+  const useBars  = _clipKeysForBars(clip, bars).bars;
+  const beatDur  = 60 / bpm;
+  const clipDur  = useBars * beatsPerBar * beatDur;
+
+  const savedEvents = timelineEvents;
+  const savedBars   = totalBars;
+  let kfs;
+  try {
+    timelineEvents = [{ type: 'perf', presetId: clipId, beat: 1, bars: useBars }];
+    totalBars = Math.ceil(useBars) + 1;
+    kfs = buildKeyframes();
+  } finally {
+    timelineEvents = savedEvents;
+    totalBars = savedBars;
+  }
+
+  const KEYS14 = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
+  const peak = {}; KEYS14.forEach(k => { peak[k] = { v: 0, t: 0 }; });
+  const dt = sampleMs / 1000;
+  let prevAngles = null, prevT = null;
+  for (let t = 0; t <= clipDur + 0.1; t += dt) {
+    const cur = interpolateAngles(t, kfs);
+    if (prevAngles) {
+      const realDt = t - prevT;
+      KEYS14.forEach(k => {
+        const v = Math.abs(((cur[k] ?? 0) - (prevAngles[k] ?? 0)) / realDt);
+        if (v > peak[k].v) peak[k] = { v, t };
+      });
+    }
+    prevAngles = cur; prevT = t;
+  }
+  const report = KEYS14
+    .map(k => ({ joint: k, vel: +peak[k].v.toFixed(3), atT: +peak[k].t.toFixed(3),
+                 limit: _JOINT_MAX_VEL[k], pct: Math.round(peak[k].v / (_JOINT_MAX_VEL[k] || 2) * 100) }))
+    .sort((a, b) => b.pct - a.pct);
+  return report;
+};
+
+/** 클립 재생 중 스틱 팁이 드럼(들)에 얼마나 가까워지는지 실측 —
+ *  "스틱 포인팅이 여전히 드럼과 충돌할 여지가 있어 보인다"는 지적을 손
+ *  계산이 아니라 실제 FK로 확인하기 위한 도구(checkClipRealVelocity와
+ *  같은 패턴: buildKeyframes()로 실제 재생 경로를 만들고 그 위를 샘플링).
+ *  각 드럼까지의 최소 거리와 그 시각을 반환 — minClearance(기본 12cm)보다
+ *  가까우면 risky:true로 표시한다. */
+window.checkClipDrumClearance = function (clipId, bars, minClearance = 0.12, sampleMs = 10) {
+  const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[clipId] : null;
+  if (!clip) return 'no such clip';
+  const useBars = _clipKeysForBars(clip, bars).bars;
+  const beatDur = 60 / bpm;
+  const clipDur = useBars * beatsPerBar * beatDur;
+
+  const savedEvents = timelineEvents;
+  const savedBars   = totalBars;
+  let kfs;
+  try {
+    timelineEvents = [{ type: 'perf', presetId: clipId, beat: 1, bars: useBars }];
+    totalBars = Math.ceil(useBars) + 1;
+    kfs = buildKeyframes();
+  } finally {
+    timelineEvents = savedEvents;
+    totalBars = savedBars;
+  }
+
+  const dt = sampleMs / 1000;
+  const results = [];
+  ['L', 'R'].forEach(arm => {
+    drumKit.forEach(drum => {
+      let min = Infinity, minT = 0;
+      for (let t = 0; t <= clipDur + 0.1; t += dt) {
+        const angles = interpolateAngles(t, kfs);
+        const tip = _pureFKStick(angles, arm).tip;
+        const d = tip.distanceTo(new THREE.Vector3(drum.pos.x, drum.pos.y, drum.pos.z));
+        if (d < min) { min = d; minT = t; }
+      }
+      results.push({ arm, drum: drum.name, minDist: +min.toFixed(3), atT: +minT.toFixed(3), risky: min < minClearance });
+    });
+  });
+  return results.sort((a, b) => a.minDist - b.minDist);
+};
+
 /** 실시간 재생 없이 특정 진행률(0~1)의 포즈를 즉시 반영 — 검증·스크린샷용.
  *  setInterval 기반 미리보기는 탭이 백그라운드로 처리되면 쓰로틀링돼
  *  멈춘 것처럼 보일 수 있어, 확인용으로는 이 동기 버전을 쓴다. */
-window.previewPerfClipAt = function (clipId, at) {
+window.previewPerfClipAt = function (clipId, at, wantBars) {
   const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[clipId] : null;
   if (!clip) { setStatus(`퍼포먼스 클립 없음: ${clipId}`); return 'no such clip'; }
-  const keys   = clip.keys.slice().sort((a, b) => a.at - b.at);
+  const keys   = _clipKeysForBars(clip, wantBars).keys.slice().sort((a, b) => a.at - b.at);
   const KEYS14 = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
   const poseObj = arr => { const o = {}; KEYS14.forEach((k, i) => { o[k] = arr[i] ?? 0; }); return o; };
   const clamped = Math.min(1, Math.max(0, at));

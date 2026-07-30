@@ -612,6 +612,23 @@ body {
 }
 .tl-perf-block-del:hover { color: #ff6666; }
 
+/* 드럼 레인 중 퍼포먼스가 점유한 구간 — 그 구간 동안은 양팔이 퍼포먼스
+   포즈를 전담하므로 타격 배치가 불가능함을 사선 해치 패턴으로 표시한다. */
+.tl-perf-mask {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(160,90,220,0.16) 0px,
+    rgba(160,90,220,0.16) 6px,
+    rgba(160,90,220,0.05) 6px,
+    rgba(160,90,220,0.05) 12px
+  );
+  z-index: 1;
+}
+
 /* 퍼포먼스 클립 선택 메뉴 — position:fixed로 클릭 좌표에 얹되, JS에서
    getBoundingClientRect()로 화면 경계를 확인해 안쪽으로 당긴다(그냥
    좌표에만 얹으면 화면 아래·오른쪽 근처 클릭 시 메뉴가 잘린다). */
@@ -641,6 +658,7 @@ body {
 .tl-perf-menu-item:hover { background: rgba(160,90,220,0.25); }
 .tl-perf-menu-bars { font-size: 10px; color: #8888aa; flex-shrink: 0; }
 .tl-perf-menu-cancel { color: #999; justify-content: center; margin-top: 2px; border-top: 1px solid #2a2a44; }
+.tl-perf-menu-back { color: #b89adf; justify-content: center; }
 .tl-grid-line {
   position: absolute;
   top: 0; bottom: 0;
