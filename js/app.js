@@ -5057,6 +5057,12 @@ window.previewPerfClip = function (clipId) {
   clearTCPTrails();
   setStatus(`퍼포먼스 미리보기: ${clip.name} (${duration.toFixed(2)}s)`);
 
+  // 메인 애니메이션 루프(animate())는 이 플래그가 꺼져 있으면 매 프레임
+  // updateFK(interpolateAngles(t, _playKFs))로 되돌려버린다(previewDrumHit도
+  // 동일하게 이 플래그로 막는다) — 안 켜면 여기서 그린 포즈가 다음 프레임에
+  // 바로 덮어써져 화면엔 아무것도 안 보인다(실측 확인된 버그).
+  window._drumPreviewActive = true;
+
   let segIdx = 0;
   let segT0  = performance.now();
 
@@ -5064,6 +5070,7 @@ window.previewPerfClip = function (clipId) {
     if (segIdx >= keys.length - 1) {
       clearInterval(_perfPreviewTimer);
       _perfPreviewTimer = null;
+      window._drumPreviewActive = false;
       updateFK({ ...NEUTRAL });
       setStatus(`퍼포먼스 미리보기 종료: ${clip.name}`);
       return;
@@ -5106,6 +5113,9 @@ window.previewPerfClipAt = function (clipId, at) {
   const from = poseObj(kA.pose), to = poseObj(kB.pose);
   const cur = { L_grip: 0, R_grip: 0 };
   KEYS14.forEach(k => { cur[k] = (from[k] ?? 0) + ((to[k] ?? 0) - (from[k] ?? 0)) * st; });
+  // previewPerfClip과 동일한 이유로 필요 — 이 플래그 없으면 메인 루프가
+  // 다음 프레임에 바로 되돌려서 화면엔 아무 변화도 안 보인다.
+  window._drumPreviewActive = true;
   updateFK(cur);
   return `${clip.name} @ at=${clamped}`;
 };
