@@ -4540,8 +4540,12 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
   hit.style.boxShadow   = VEL_GLOW[vel](typeInfo.color);
   const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
   const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
-  hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
-  hit.addEventListener('click',       e => { e.stopPropagation(); applyVel(drum.id, evt.beat, effArm); });
+  hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (드래그: 박자 이동 / 클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
+  hit.addEventListener('click', e => {
+    e.stopPropagation();
+    if (performance.now() < _tlDragSuppressClickUntil) return; // 드래그 직후 트레일링 클릭 무시
+    applyVel(drum.id, evt.beat, effArm);
+  });
   hit.addEventListener('dblclick',    e => { e.preventDefault(); e.stopPropagation(); if (splitArm) _showArmDropdown(e.clientX, e.clientY, drum.id, evt.beat, effArm); });
   hit.addEventListener('contextmenu', e => {
     e.preventDefault(); e.stopPropagation();
@@ -4549,6 +4553,53 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
     // 점 위에 떨어지면, 의도치 않게 그 점까지 하나 더 지워버리는 걸 방지.
     if (performance.now() < _tlDragSuppressClickUntil) return;
     removeEvent(drum.id, evt.beat, effArm);
+  });
+  // 드래그로 타격 박자 이동 — 퍼포먼스 블록과 같은 패턴(사용자 피드백:
+  // "퍼포먼스를 드래그로 끌어서 박자를 옮기는 것처럼 드럼 타임라인도
+  // 가능할까"). 왼쪽 버튼만 처리해 오른쪽 버튼 지우개-드래그(레인 레벨)는
+  // 그대로 두고, 실제로 일정 거리 이상 움직였을 때만 드래그로 간주해
+  // 클릭(강도 변경)·더블클릭(팔 변경)과 충돌하지 않게 한다. 퍼포먼스가
+  // 점유한 구간으로는 옮길 수 없다(addEvent와 동일한 제약 — _isBeatInPerf).
+  hit.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const lane = hit.closest('.tl-lane');
+    if (!lane) return;
+    const startX      = e.clientX;
+    const totalBeats   = totalBars * beatsPerBar;
+    const div          = parseInt(document.getElementById('grid-sel')?.value || 8);
+    let moved = false;
+    function beatAt(clientX) {
+      const rect = lane.getBoundingClientRect();
+      let beat = (clientX - rect.left) / PX_PER_BEAT + 1;
+      if (document.getElementById('chk-snap')?.checked) {
+        const snapUnit = 4 / div;
+        beat = Math.round(beat / snapUnit) * snapUnit;
+      }
+      return parseFloat(clamp(beat, 1, totalBeats + 1).toFixed(4));
+    }
+    function onMove(me) {
+      if (Math.abs(me.clientX - startX) > 3) moved = true;
+      const newBeat = beatAt(me.clientX);
+      if (_isBeatInPerf(newBeat)) return; // 퍼포먼스 구간엔 놓을 수 없음
+      if (newBeat !== evt.beat) {
+        evt.beat = newBeat;
+        hit.style.left   = ((evt.beat - 1) * PX_PER_BEAT) + 'px';
+        hit.dataset.key  = `${drum.id}_${evt.beat}_${effArm}`;
+        hit.dataset.beat = `${drum.id}_${evt.beat}`;
+      }
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (moved) {
+        _tlDragSuppressClickUntil = performance.now() + 300;
+        _commitTimeline();
+      }
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   });
   return hit;
 }
