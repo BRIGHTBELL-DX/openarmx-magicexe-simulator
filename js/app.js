@@ -1525,6 +1525,29 @@ let _audioSrc  = null;
 let _audioStartCtxT = 0;
 let _audioPlayOff   = 0;
 
+// "🎵 음악 로드"로 올린 커스텀 파일 — 이번 세션 동안만 BGM 드롭다운의
+// 'custom' 항목으로 등록해서 Mastering/Bitcrush처럼 전환할 수 있게 한다
+// (새로고침하면 사라짐 — 영구 저장은 하지 않음). 큰 파일은 메모리 절약을
+// 위해 자동으로 다운샘플한다(_downsampleIfLarge).
+let _customBgmBuffer = null;
+let _customBgmLabel  = '';
+const _CUSTOM_BGM_SIZE_THRESHOLD = 8 * 1024 * 1024; // 8MB
+
+/** 원본 파일이 크면(threshold 초과) 샘플레이트를 44.1kHz로 캡하고 모노로
+ *  섞어 메모리를 크게 줄인다 — 작은 파일은 원본 그대로 둔다. */
+async function _downsampleIfLarge(buffer, originalFileSize) {
+  if (originalFileSize <= _CUSTOM_BGM_SIZE_THRESHOLD) return buffer;
+  const targetRate = Math.min(buffer.sampleRate, 44100);
+  const targetChannels = 1;
+  if (targetRate === buffer.sampleRate && buffer.numberOfChannels === targetChannels) return buffer;
+  const offlineCtx = new OfflineAudioContext(targetChannels, Math.ceil(buffer.duration * targetRate), targetRate);
+  const src = offlineCtx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(offlineCtx.destination);
+  src.start();
+  return offlineCtx.startRendering();
+}
+
 // BGM 음량 — _audioSrc를 destination에 바로 물리지 않고 이 게인 노드를
 // 거치게 해서 슬라이더로 조절한다. _audioCtx는 트랙을 바꿔도(setBgmTrack)
 // 그대로 재사용되므로 한 번만 만들면 된다.
@@ -4202,6 +4225,34 @@ animate();
 // 다른데도 "안 바뀐 것"으로 오판해 파형이 갱신되지 않는 문제가 있다.
 let _audioGen = 0;
 
+// 새 BGM 버퍼를 실제로 적용 — 타임라인 마디 수 자동 확장, 파형 갱신,
+// 재생 중이었으면 새 버퍼로 이어서 재생 재시작까지 mastering/bitcrush
+// 고정 트랙과 커스텀 업로드 트랙이 공통으로 거치는 마무리 단계.
+function _applyLoadedBgmBuffer(buf, label) {
+  _audioBuf = buf;
+  _audioGen++;
+  const nameEl = document.getElementById('audio-name');
+  if (nameEl) nameEl.textContent = label;
+
+  // 곡이 고정 길이이므로, 타임라인(마디 수)이 곡 전체 길이를 항상
+  // 덮도록 자동으로 맞춘다 — 기존 마디 수가 이미 곡보다 길면 그대로 둔다.
+  const barDur     = (60 / bpm) * beatsPerBar;
+  const neededBars = Math.ceil(_audioBuf.duration / barDur) + 1; // 여유 1마디
+  if (totalBars < neededBars) {
+    totalBars = neededBars;
+    const barsEl = document.getElementById('bars-inp');
+    if (barsEl) barsEl.value = totalBars;
+    updateTLInfo();
+    saveSettings();
+  }
+  renderTimeline();   // 마디 수가 그대로여도 새 오디오 버퍼로 파형은 다시 그려야 한다
+  if (isPlaying) _playAudio(pauseOffset);
+}
+
+// "🎵 음악 로드"로 올린 파일 — 디코드 후 크면 자동으로 다운샘플하고,
+// BGM 드롭다운에 'custom' 항목으로 등록해 Mastering/Bitcrush처럼 바로
+// 전환할 수 있게 한다(사용자 피드백: "새로운 음악 파일 넣으면 BGM에
+// 들어가줄 수 있어?"). 이번 세션 동안만 유지 — 새로고침하면 사라진다.
 window.loadAudioFile = function (input) {
   const file = input.files[0];
   if (!file) return;
@@ -4209,12 +4260,31 @@ window.loadAudioFile = function (input) {
   const reader = new FileReader();
   reader.onload = async e => {
     try {
-      _audioBuf = await _audioCtx.decodeAudioData(e.target.result.slice(0));
-      _audioGen++;
-      const nameEl = document.getElementById('audio-name');
-      if (nameEl) nameEl.textContent = file.name;
-      setStatus(`음악 로드: ${file.name} (${_audioBuf.duration.toFixed(1)}s)`);
-      renderTimeline();
+      const decoded = await _audioCtx.decodeAudioData(e.target.result.slice(0));
+      const compressed = await _downsampleIfLarge(decoded, file.size);
+      const wasCompressed = compressed !== decoded;
+      _customBgmBuffer = compressed;
+      _customBgmLabel  = file.name;
+
+      const sel = document.getElementById('bgm-sel');
+      if (sel) {
+        let opt = sel.querySelector('option[value="custom"]');
+        if (!opt) {
+          opt = document.createElement('option');
+          opt.value = 'custom';
+          sel.appendChild(opt);
+        }
+        opt.textContent = `커스텀: ${file.name}`;
+        sel.value = 'custom';
+      }
+      try { localStorage.setItem(_BGM_CHOICE_STORE, 'custom'); } catch (err) {}
+
+      _applyLoadedBgmBuffer(compressed, file.name);
+      setStatus(
+        `음악 로드: ${file.name} (${compressed.duration.toFixed(1)}s)` +
+        (wasCompressed ? ' — 용량이 커서 자동으로 압축(모노·44.1kHz)했습니다' : '') +
+        ' · BGM 드롭다운에 등록됨(이번 세션 동안)'
+      );
     } catch (err) {
       setStatus('오디오 디코드 실패: ' + err.message);
     }
@@ -4235,9 +4305,9 @@ const _BGM_CHOICE_STORE = 'openarmx_bgm_choice_v1';
 window.setBgmTrack = async function (choice, { silent = false } = {}) {
   const sel = document.getElementById('bgm-sel');
   if (sel && sel.value !== choice) sel.value = choice;
-  try { localStorage.setItem(_BGM_CHOICE_STORE, choice); } catch (e) {}
 
   if (choice === 'off') {
+    try { localStorage.setItem(_BGM_CHOICE_STORE, choice); } catch (e) {}
     _stopAudio();
     _audioBuf = null;
     _audioGen++;
@@ -4248,8 +4318,20 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     return;
   }
 
+  if (choice === 'custom') {
+    // 커스텀 트랙은 이미 메모리에 디코드돼 있어(음악 로드 시점에) 네트워크
+    // 요청 없이 바로 적용 — 새로고침 후엔 등록이 사라지므로 자동 로드
+    // 대상에서는 제외(아래 _autoLoadDefaultSong 참고).
+    if (!_customBgmBuffer) return;
+    try { localStorage.setItem(_BGM_CHOICE_STORE, choice); } catch (e) {}
+    _applyLoadedBgmBuffer(_customBgmBuffer, _customBgmLabel);
+    if (!silent) setStatus(`음악 로드: ${_customBgmLabel} (${_customBgmBuffer.duration.toFixed(1)}s)`);
+    return;
+  }
+
   const track = BGM_TRACKS[choice];
   if (!track) return;
+  try { localStorage.setItem(_BGM_CHOICE_STORE, choice); } catch (e) {}
   // 트랙을 새로 받는 동안(캐시에 없으면 네트워크 왕복이 걸림) 드롭다운을
   // 잠그고 "로드 중" 표시를 해서 아무 반응이 없는 것처럼 보이지 않게 한다.
   if (sel) sel.disabled = true;
@@ -4260,26 +4342,9 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     if (!silent) setStatus(`음악 로드 중: ${track.label}...`);
     const res = await fetch(track.file);
     const buf = await res.arrayBuffer();
-    _audioBuf = await _audioCtx.decodeAudioData(buf);
-    _audioGen++;
-    if (nameEl) nameEl.textContent = track.label;
-
-    // 곡이 고정 길이이므로, 타임라인(마디 수)이 곡 전체 길이를 항상
-    // 덮도록 자동으로 맞춘다 — 기존 마디 수가 이미 곡보다 길면 그대로 둔다.
-    const barDur     = (60 / bpm) * beatsPerBar;
-    const neededBars = Math.ceil(_audioBuf.duration / barDur) + 1; // 여유 1마디
-    if (totalBars < neededBars) {
-      totalBars = neededBars;
-      const barsEl = document.getElementById('bars-inp');
-      if (barsEl) barsEl.value = totalBars;
-      updateTLInfo();
-      saveSettings();
-    }
-    renderTimeline();   // 마디 수가 그대로여도 새 오디오 버퍼로 파형은 다시 그려야 한다
-
+    const decoded = await _audioCtx.decodeAudioData(buf);
+    _applyLoadedBgmBuffer(decoded, track.label);
     setStatus(`음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
-    // 재생 중에 트랙을 바꾼 경우 새 버퍼로 이어서 재생되도록 다시 시작한다.
-    if (isPlaying) _playAudio(pauseOffset);
   } catch (err) {
     if (nameEl) nameEl.textContent = '로드 실패';
     setStatus(`${track.label} 로드 실패: ` + err.message);
@@ -4291,6 +4356,9 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
 async function _autoLoadDefaultSong() {
   let choice = 'mastering';
   try { choice = localStorage.getItem(_BGM_CHOICE_STORE) || 'mastering'; } catch (e) {}
+  // 커스텀 트랙은 세션 한정이라 새로고침 후엔 복원할 버퍼가 없다 —
+  // 기본값(mastering)으로 대신 로드한다.
+  if (choice === 'custom') choice = 'mastering';
   await window.setBgmTrack(choice, { silent: true });
   if (choice === 'off') { setStatus('BGM 꺼짐 (이전 선택 복원) — 소리 없이 애니메이션만 재생됩니다'); return; }
   const track = BGM_TRACKS[choice] || BGM_TRACKS.mastering;
