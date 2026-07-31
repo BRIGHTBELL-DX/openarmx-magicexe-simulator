@@ -292,7 +292,8 @@ function _rebuildFlashSchedule() {
     if (!drum) return null;
     const ti = DRUM_TYPES[drum.type];
     return { beat: evt.beat, rebDur: ti?.rebDur || 0.1,
-             key: `${evt.drumId}_${evt.beat}`, type: drum.type, drumId: evt.drumId };
+             key: `${evt.drumId}_${evt.beat}`, type: drum.type, drumId: evt.drumId,
+             vel: evt.vel ?? 'medium' };
   }).filter(Boolean);
   _flashDirty = false;
 }
@@ -2752,6 +2753,7 @@ window.exportAudio = async function () {
 
   setStatus('🎵 오디오 렌더링 중... (잠시 대기)');
   await new Promise(r => setTimeout(r, 30)); // UI 업데이트 대기
+  await _preloadDrumSamples(_getDrumCtx());   // 샘플이 아직이면 여기서 로드 완료까지 대기
 
   try {
     const SR   = 44100;
@@ -2760,12 +2762,13 @@ window.exportAudio = async function () {
     const bd   = 60 / bpm;
     const iOff = _getAudioTimeOffset(); // 인트로 오프셋
 
-    // ── 드럼 합성음 스케줄 ─────────────────────────────────────
+    // ── 드럼 사운드 스케줄(샘플 우선, 없으면 합성음 폴백) ────────
     timelineEvents.forEach(evt => {
       const drum = drumKit.find(d => d.id === evt.drumId);
       if (!drum) return;
       const hitT = (evt.beat - 1) * bd + iOff;
       if (hitT < 0 || hitT >= totalDur) return;
+      if (_scheduleDrumSampleAt(drum.type, evt.vel ?? 'medium', ctx, hitT, bus)) return;
       const fn = _drumSounds[drum.type] || _drumSounds.tom_m;
       fn(hitT, ctx, undefined, bus);
     });
@@ -3110,7 +3113,8 @@ function updateJointHud(angles) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  드럼 사운드 합성 (Web Audio — 외부 파일 없이 합성음 사용)
+//  드럼 사운드 — 실제 샘플(assets/drum_hits/*.mp3) 재생, 로드 전이거나
+//  누락된 조합은 아래 합성음(_drumSounds)으로 안전하게 대체
 // ═══════════════════════════════════════════════════════════════
 let _drumAudioCtx  = null;
 let _drumMasterBus = null;
@@ -3128,9 +3132,92 @@ function _getDrumCtx() {
     _drumGainNode.gain.value = parseFloat(document.getElementById('drum-click-volume')?.value) || 1;
     _drumGainNode.connect(comp);
     _drumMasterBus = _drumGainNode;
+    _preloadDrumSamples(_drumAudioCtx);
   }
   if (_drumAudioCtx.state === 'suspended') _drumAudioCtx.resume();
   return _drumAudioCtx;
+}
+
+// 드럼 샘플 V2(약/중/강 3단계 × 8종) — 각주 사양: WAV/48kHz/24bit/모노,
+// 배포용으로 mp3 96kbps 모노로 재인코딩해 assets/drum_hits/에 뒀다.
+// decodeAudioData 결과(AudioBuffer)는 컨텍스트에 종속되지 않아 라이브
+// 컨텍스트에서 디코드해도 오프라인(WAV 내보내기) 컨텍스트에서 그대로
+// 재생 가능 — 두 경로가 이 캐시를 공유한다.
+const _DRUM_SAMPLE_TYPES = ['hihat','crash','snare','tom_h','kick','tom_m','tom_f','ride'];
+const _DRUM_SAMPLE_VELS  = ['soft','medium','hard'];
+const _drumSampleBuffers = {};   // { [type]: { [vel]: AudioBuffer } }
+let _drumSamplesReady = null;    // 전체 로드 완료를 기다리는 Promise
+
+function _preloadDrumSamples(ctx) {
+  if (_drumSamplesReady) return _drumSamplesReady;
+  const jobs = [];
+  _DRUM_SAMPLE_TYPES.forEach(type => {
+    _drumSampleBuffers[type] = {};
+    _DRUM_SAMPLE_VELS.forEach(vel => {
+      jobs.push(
+        fetch(`assets/drum_hits/${type}_${vel}.mp3`)
+          .then(res => res.arrayBuffer())
+          .then(buf => ctx.decodeAudioData(buf))
+          .then(decoded => { _drumSampleBuffers[type][vel] = decoded; })
+          .catch(() => {})   // 실패한 조합만 합성음 폴백으로 남는다
+      );
+    });
+  });
+  _drumSamplesReady = Promise.all(jobs);
+  return _drumSamplesReady;
+}
+
+// 같은 드럼(특히 심벌)에 짧은 간격으로 연타가 들어오면 긴 잔향 샘플이
+// 계속 쌓여 소리가 뭉개질 수 있다 — 사용자 지적: "심벌 같은 건 길어지긴
+// 하는데 연속 타격을 할 수 있어서 고려해야 할 부분이 있을 것 같다".
+// 드럼 타입별 동시 재생 보이스 수를 제한해, 넘치면 가장 오래된 보이스를
+// 짧게 페이드아웃(클릭 방지)한 뒤 정지시키는 보이스 스틸링을 적용한다.
+const _MAX_VOICES_PER_TYPE = 5;
+const _activeVoices = {};   // { [type]: Array<{src, gain, ctx}> }
+
+function _playDrumSample(type, vel, ctx, dest) {
+  const buf = _drumSampleBuffers[type]?.[vel] || _drumSampleBuffers[type]?.medium;
+  if (!buf) return false;
+
+  const voices = _activeVoices[type] || (_activeVoices[type] = []);
+  if (voices.length >= _MAX_VOICES_PER_TYPE) {
+    const oldest = voices.shift();
+    try {
+      const now = oldest.ctx.currentTime;
+      oldest.gain.gain.cancelScheduledValues(now);
+      oldest.gain.gain.setValueAtTime(oldest.gain.gain.value, now);
+      oldest.gain.gain.linearRampToValueAtTime(0.0001, now + 0.03);
+      oldest.src.stop(now + 0.035);
+    } catch (e) {}
+  }
+
+  const src = ctx.createBufferSource();
+  const g   = ctx.createGain();
+  src.buffer = buf;
+  src.connect(g); g.connect(dest);
+  src.start();
+
+  const voice = { src, gain: g, ctx };
+  voices.push(voice);
+  src.onended = () => {
+    const idx = voices.indexOf(voice);
+    if (idx >= 0) voices.splice(idx, 1);
+  };
+  return true;
+}
+
+// 🎵 비트 WAV 내보내기(오프라인 렌더링) 전용 — 전체 타임라인을 한 번에
+// 미리 스케줄하므로 "지금 재생 중인 보이스" 개념(ctx.currentTime 기준
+// 보이스 스틸링)이 성립하지 않는다. 지정된 시각 t에 그냥 스케줄만 한다
+// — 컴프레서(_makeDrumBus)가 여러 겹 소리의 레벨은 이미 관리해준다.
+function _scheduleDrumSampleAt(type, vel, ctx, t, dest) {
+  const buf = _drumSampleBuffers[type]?.[vel] || _drumSampleBuffers[type]?.medium;
+  if (!buf) return false;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(dest);
+  src.start(t);
+  return true;
 }
 window.setDrumClickVolume = function (val) {
   const v = parseFloat(val) || 0;
@@ -3325,14 +3412,28 @@ window.toggleDrumSound = function () {
   });
 };
 
-function playDrumSound(drumType) {
+function playDrumSound(drumType, vel = 'medium') {
   if (!_drumSoundOn) return;
   try {
-    const c  = _getDrumCtx();
+    const c = _getDrumCtx();
+    if (_playDrumSample(drumType, vel, c, _drumMasterBus)) return;
+    // 샘플이 아직 로드되기 전(첫 재생 시작 직후)이거나 알 수 없는 타입이면
+    // 기존 합성음으로 대체 — 소리가 완전히 안 나는 것보다 낫다.
     const fn = _drumSounds[drumType] || _drumSounds.tom_m;
     fn(c.currentTime + 0.005, c, undefined, _drumMasterBus);
   } catch(e) {}
 }
+
+/** 콘솔 테스트/QA용 — 실제 재생 없이 특정 드럼·세기의 사운드만 즉시 재생.
+ *  샘플이 로드됐는지(true=샘플 재생, false=합성음 폴백)도 함께 반환. */
+window.testDrumSound = async function (drumType, vel = 'medium') {
+  await _preloadDrumSamples(_getDrumCtx());
+  const usedSample = !!(_drumSampleBuffers[drumType]?.[vel] || _drumSampleBuffers[drumType]?.medium);
+  playDrumSound(drumType, vel);
+  return { drumType, vel, usedSample, activeVoiceCounts: Object.fromEntries(
+    Object.entries(_activeVoices).map(([k, v]) => [k, v.length])
+  ) };
+};
 
 // ═══════════════════════════════════════════════════════════════
 //  TCP 궤적 렌더링
@@ -4181,7 +4282,7 @@ function animate() {
         mesh.material.emissiveIntensity = 1.8;
         mesh.scale.setScalar(1.25);
         document.querySelectorAll(`.tl-hit[data-beat="${key}"]`).forEach(h => h.classList.add('flash'));
-        playDrumSound(ev.type);   // ← 드럼 사운드 트리거
+        playDrumSound(ev.type, ev.vel);   // ← 드럼 사운드 트리거(약/중/강 샘플 반영)
       } else if (!inHit && _flashState[key]) {
         _flashState[key] = false;
         mesh.material.emissiveIntensity = 0.22;
