@@ -4400,8 +4400,51 @@ window.loadAudioFile = function (input) {
 const BGM_TRACKS = {
   mastering: { file: 'assets/magicexe_mastering.mp3', label: 'MAGIC.EXE (Mastering)' },
   bitcrush:  { file: 'assets/magicexe_bitcrush.mp3',  label: 'MAGIC.EXE (Bitcrush)' },
+  // suno_pattern.js(robot_control_8_instruments.yaml 변환본)가 로드돼 있으면
+  // 이 트랙을 고를 때 그 전용 타임라인으로 통째로 교체한다(pattern 플래그).
+  suno:      { file: 'assets/magicexe_suno.mp3', label: 'MAGIC.EXE (SUNO)', pattern: true },
 };
 const _BGM_CHOICE_STORE = 'openarmx_bgm_choice_v1';
+
+// SUNO 트랙 전용 타임라인 적용 — suno_pattern.js(별도 <script>)가 정의하는
+// SUNO_PATTERN(드럼 타입+beat, 이 곡 전용 BPM 기준)을 현재 drumKit에 맞춰
+// timelineEvents로 통째로 교체한다. 사용자 확인 사항 3가지 반영:
+//  1) BPM은 곡 자체가 진행 중 조금씩 변해 고정 BPM으로 완전히 맞출 수
+//     없지만, beat=1+time_sec/(60/BPM) 변환이 그대로 역변환 가능해 이
+//     BPM(기존 기본값 137.000064 재사용)으로도 원래 시각이 정확히
+//     복원된다(그리드 상 박자 의미만 없어짐) — "최대한 시간에 맞춰서".
+//  2) SUNO.mp3는 자체 2초 무음이 이미 있어 앱의 "4마디 인트로"(+4초)를
+//     끈다 — "이 곡만 앱 인트로 끔(0초)".
+//  3) 기존 타임라인은 덮어쓰고 교체 — "덮어쓰고 교체".
+function _applySunoPattern() {
+  if (typeof SUNO_PATTERN === 'undefined' || !SUNO_PATTERN.length) return;
+
+  bpm = SUNO_PATTERN_BPM;
+  const bpmEl = document.getElementById('bpm-inp');
+  if (bpmEl) bpmEl.value = bpm;
+
+  timelineEvents = SUNO_PATTERN.map(e => {
+    const drum = drumKit.find(d => d.type === e.t);
+    if (!drum) return null;
+    return { drumId: drum.id, beat: e.beat, vel: 'medium' };
+  }).filter(Boolean);
+
+  const maxBeat     = Math.max(...SUNO_PATTERN.map(e => e.beat));
+  const neededBars  = Math.ceil(maxBeat / beatsPerBar) + 1;
+  if (totalBars < neededBars) {
+    totalBars = neededBars;
+    const barsEl = document.getElementById('bars-inp');
+    if (barsEl) barsEl.value = totalBars;
+  }
+
+  const introEl = document.getElementById('chk-intro');
+  if (introEl && introEl.checked) introEl.checked = false;
+
+  updateTLInfo();
+  saveSettings();
+  saveTimeline();
+  renderTimeline();
+}
 
 window.setBgmTrack = async function (choice, { silent = false } = {}) {
   const sel = document.getElementById('bgm-sel');
@@ -4445,7 +4488,15 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     const buf = await res.arrayBuffer();
     const decoded = await _audioCtx.decodeAudioData(buf);
     _applyLoadedBgmBuffer(decoded, track.label);
-    setStatus(`음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
+    // silent(=페이지 로드 시 마지막 선택 복원)일 땐 패턴을 다시 덮어쓰지
+    // 않는다 — 그렇지 않으면 SUNO 선택 후 타임라인을 직접 수정했더라도
+    // 새로고침할 때마다 원본 yaml 패턴으로 매번 되돌아가 버린다. 명시적으로
+    // 드롭다운에서 고를 때만(!silent) 실제로 "덮어쓰고 교체"한다.
+    if (track.pattern && !silent) _applySunoPattern();
+    setStatus(
+      `음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디` +
+      (track.pattern && !silent ? ' · 전용 패턴으로 교체됨(인트로 꺼짐)' : '')
+    );
   } catch (err) {
     if (nameEl) nameEl.textContent = '로드 실패';
     setStatus(`${track.label} 로드 실패: ` + err.message);

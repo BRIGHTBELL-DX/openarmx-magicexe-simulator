@@ -44,10 +44,11 @@
     </div>
 
     <div class="hdr-group">
-      <label title="같은 타임라인 기준 3가지 BGM 버전 중 선택 — 끄기를 고르면 소리 없이 애니메이션만 재생됩니다">🎵 BGM
+      <label title="Mastering/Bitcrush는 같은 타임라인 기준, SUNO는 전용 타임라인(선택 시 자동 교체) — 끄기를 고르면 소리 없이 애니메이션만 재생됩니다">🎵 BGM
         <select id="bgm-sel" onchange="setBgmTrack(this.value)">
           <option value="mastering">믹스 (Mastering)</option>
           <option value="bitcrush">비트크러시 (Bitcrush)</option>
+          <option value="suno">MAGIC.EXE (SUNO)</option>
           <option value="off">끄기</option>
         </select>
       </label>
@@ -254,7 +255,8 @@
 </script>
 <script src="js/intro_outro_presets.js?v=14"></script>
 <script src="js/performance_presets.js?v=29"></script>
-<script type="module" src="js/app.js?v=106"></script>
+<script src="js/suno_pattern.js?v=1"></script>
+<script type="module" src="js/app.js?v=108"></script>
 <script>
 // 메시(STL)·BGM(mp3) 캐싱용 서비스워커 — 첫 방문 이후 새로고침에서 이 큰
 // 파일들을 다시 받지 않고 즉시 로드되게 한다(sw.js 참고).
