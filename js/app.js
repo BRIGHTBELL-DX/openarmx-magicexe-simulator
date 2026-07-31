@@ -4434,7 +4434,11 @@ function _applySunoPattern() {
   timelineEvents = SUNO_PATTERN.map(e => {
     const drum = drumKit.find(d => d.type === e.t);
     if (!drum) return null;
-    return { drumId: drum.id, beat: e.beat, vel: e.v || 'medium' };
+    const ev = { drumId: drum.id, beat: e.beat, vel: e.v || 'medium' };
+    // 스네어는 드럼 킷의 기본 배정 팔과 무관하게 항상 오른팔로 고정
+    // — 사용자 요청: "스네어 모두 오른팔에 배치".
+    if (e.t === 'snare') ev.arm = 'R';
+    return ev;
   }).filter(Boolean);
 
   const maxBeat     = Math.max(...SUNO_PATTERN.map(e => e.beat));
