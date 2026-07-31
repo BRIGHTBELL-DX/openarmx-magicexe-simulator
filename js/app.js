@@ -1496,6 +1496,14 @@ let timelineEvents = [
   {drumId:'d2',beat:434,vel:'hard',arm:'L'},
   {drumId:'d1',beat:138.5,vel:'hard',arm:'R'}
 ];
+// 사이트 첫 접속 시 표출되는 기본 상태 스냅샷 — SUNO 트랙(전용 패턴으로
+// 타임라인을 통째로 교체)에서 다시 Mastering/Bitcrush로 돌아올 때 이
+// 초기 상태로 복원하는 데 쓴다(_applySunoPattern 반대편, setBgmTrack의
+// mastering/bitcrush 분기 참고).
+const DEFAULT_TIMELINE_EVENTS = JSON.parse(JSON.stringify(timelineEvents));
+const DEFAULT_BPM = 137.000064;
+const DEFAULT_TOTAL_BARS = 122;
+
 let bpm = 137.000064; // 사용자 프로젝트 파일 기준 원곡 템포
 let beatsPerBar = 4;
 let totalBars = 122;
@@ -4426,7 +4434,7 @@ function _applySunoPattern() {
   timelineEvents = SUNO_PATTERN.map(e => {
     const drum = drumKit.find(d => d.type === e.t);
     if (!drum) return null;
-    return { drumId: drum.id, beat: e.beat, vel: 'medium' };
+    return { drumId: drum.id, beat: e.beat, vel: e.v || 'medium' };
   }).filter(Boolean);
 
   const maxBeat     = Math.max(...SUNO_PATTERN.map(e => e.beat));
@@ -4446,9 +4454,32 @@ function _applySunoPattern() {
   renderTimeline();
 }
 
+// SUNO(전용 패턴) 트랙에서 다른 트랙으로 돌아올 때, 사이트 첫 접속 시
+// 상태(기본 타임라인·BPM·마디 수·인트로 켬)로 복원한다 — 사용자 요청:
+// "SUNO였다가 다시 magic.exe 노래로 변경하면 사이트 처음 접속하면
+// 표출되는 타임라인으로 변경되도록". 새로고침을 거쳐도 동작해야 하므로
+// 런타임 플래그가 아니라 localStorage에 저장된 "직전 선택"으로 판단한다.
+function _restoreDefaultTimeline() {
+  timelineEvents = JSON.parse(JSON.stringify(DEFAULT_TIMELINE_EVENTS));
+  bpm = DEFAULT_BPM;
+  totalBars = DEFAULT_TOTAL_BARS;
+  const bpmEl  = document.getElementById('bpm-inp');
+  const barsEl = document.getElementById('bars-inp');
+  const introEl = document.getElementById('chk-intro');
+  if (bpmEl) bpmEl.value = bpm;
+  if (barsEl) barsEl.value = totalBars;
+  if (introEl && !introEl.checked) introEl.checked = true;
+  updateTLInfo();
+  saveSettings();
+  saveTimeline();
+  renderTimeline();
+}
+
 window.setBgmTrack = async function (choice, { silent = false } = {}) {
   const sel = document.getElementById('bgm-sel');
   if (sel && sel.value !== choice) sel.value = choice;
+  let previousChoice = null;
+  try { previousChoice = localStorage.getItem(_BGM_CHOICE_STORE); } catch (e) {}
 
   if (choice === 'off') {
     try { localStorage.setItem(_BGM_CHOICE_STORE, choice); } catch (e) {}
@@ -4493,9 +4524,14 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     // 새로고침할 때마다 원본 yaml 패턴으로 매번 되돌아가 버린다. 명시적으로
     // 드롭다운에서 고를 때만(!silent) 실제로 "덮어쓰고 교체"한다.
     if (track.pattern && !silent) _applySunoPattern();
+    // 반대 방향 — SUNO에서 Mastering/Bitcrush로 돌아오면 사이트 첫 접속
+    // 상태로 복원(마찬가지로 명시적 선택일 때만).
+    const restoredDefault = !track.pattern && previousChoice === 'suno' && !silent;
+    if (restoredDefault) _restoreDefaultTimeline();
     setStatus(
       `음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디` +
-      (track.pattern && !silent ? ' · 전용 패턴으로 교체됨(인트로 꺼짐)' : '')
+      (track.pattern && !silent ? ' · 전용 패턴으로 교체됨(인트로 꺼짐)' : '') +
+      (restoredDefault ? ' · 기본 타임라인으로 복원됨' : '')
     );
   } catch (err) {
     if (nameEl) nameEl.textContent = '로드 실패';
