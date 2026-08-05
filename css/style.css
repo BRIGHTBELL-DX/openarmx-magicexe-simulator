@@ -614,6 +614,10 @@ body {
 
 /* 드럼 레인 중 퍼포먼스가 점유한 구간 — 그 구간 동안은 양팔이 퍼포먼스
    포즈를 전담하므로 타격 배치가 불가능함을 사선 해치 패턴으로 표시한다. */
+/* 타격 배치가 불가능한 구간임을 한눈에 알 수 있도록 빨간색으로 표시
+   (기존 보라색 해치는 퍼포먼스 레인 자체의 색과 비슷해 눈에 잘 안
+   띈다는 지적 — 사용자 피드백: "직관적으로 지금 드럼 타격이 가능한지
+   볼 수가 없어서"). 좌우 경계선도 추가해 구간 시작·끝을 명확히 한다. */
 .tl-perf-mask {
   position: absolute;
   top: 0;
@@ -621,11 +625,14 @@ body {
   pointer-events: none;
   background: repeating-linear-gradient(
     135deg,
-    rgba(160,90,220,0.16) 0px,
-    rgba(160,90,220,0.16) 6px,
-    rgba(160,90,220,0.05) 6px,
-    rgba(160,90,220,0.05) 12px
+    rgba(230,50,50,0.22) 0px,
+    rgba(230,50,50,0.22) 6px,
+    rgba(230,50,50,0.07) 6px,
+    rgba(230,50,50,0.07) 12px
   );
+  border-left:  1px solid rgba(230,50,50,0.55);
+  border-right: 1px solid rgba(230,50,50,0.55);
+  box-sizing: border-box;
   z-index: 1;
 }
 

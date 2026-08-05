@@ -4355,6 +4355,13 @@ function _applyLoadedBgmBuffer(buf, label) {
     saveSettings();
   }
   renderTimeline();   // 마디 수가 그대로여도 새 오디오 버퍼로 파형은 다시 그려야 한다
+  // totalBars가 늘어났을 수 있으니 재생용 키프레임(_playKFs/_playDur)도
+  // 다시 계산 — 안 하면 재생헤드가 낡은 길이 기준으로 스케일링돼 타격
+  // 반짝임과 어긋나 보인다.
+  _playKFs = buildFinalKeyframes();
+  _playDur = _playKFs.totalTime;
+  const scrubEl = document.getElementById('scrubber');
+  if (scrubEl) scrubEl.max = _playDur;
   if (isPlaying) _playAudio(pauseOffset);
 }
 
@@ -4456,6 +4463,16 @@ function _applySunoPattern() {
   saveSettings();
   saveTimeline();
   renderTimeline();
+  // ⚠ renderTimeline()은 DOM(그리드·점)만 다시 그린다 — 재생헤드 위치·
+  // 로봇 팔 FK가 실제로 따라 쓰는 _playKFs/_playDur(빌드된 재생용
+  // 키프레임)는 별도로 재계산해야 한다. 이걸 빠뜨리면 재생헤드가 낡은
+  // 길이 기준으로 스케일링돼, 타격 반짝임(매 프레임 timelineEvents에서
+  // 새로 계산)과 재생헤드 위치가 서로 어긋나 보인다 — 사용자 지적:
+  // "재생바와 드럼키트 반짝이는게 달라" 정확히 이 증상이었다.
+  _playKFs = buildFinalKeyframes();
+  _playDur = _playKFs.totalTime;
+  const scrubEl = document.getElementById('scrubber');
+  if (scrubEl) scrubEl.max = _playDur;
 }
 
 // SUNO(전용 패턴) 트랙에서 다른 트랙으로 돌아올 때, 사이트 첫 접속 시
@@ -4477,6 +4494,11 @@ function _restoreDefaultTimeline() {
   saveSettings();
   saveTimeline();
   renderTimeline();
+  // _applySunoPattern()과 동일한 이유로 재생용 키프레임도 재계산 필요.
+  _playKFs = buildFinalKeyframes();
+  _playDur = _playKFs.totalTime;
+  const scrubEl = document.getElementById('scrubber');
+  if (scrubEl) scrubEl.max = _playDur;
 }
 
 window.setBgmTrack = async function (choice, { silent = false } = {}) {
