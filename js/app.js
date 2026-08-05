@@ -1621,6 +1621,23 @@ function reachDist(drum) {
   );
 }
 
+// reachDist(단순 직선거리)만으로는 실제 도달 가능 여부를 못 잡는 경우가
+// 있다 — 실측 확인(window.testReachIKAll): 진짜 도달 IK(_solveStickStrike)
+// 기준으로 몸통 반대쪽 드럼은 직선거리가 STICK_REACH 안이어도 J1 등
+// 관절 한계(_IK_LIMITS, 팔마다 "전방으로 뻗는" 방향만 허용) 때문에 거의
+// 항상 실패한다 — 예: 왼쪽에 있는 하이햇(y=+0.41)은 오른팔로는 거리상
+// 가까워 보여도 실제 IK가 수렴 못 함(ok:false). 반대로 몸 중앙 부근
+// 드럼(스네어 등)은 양팔 다 된다. 이 패턴이 7드럼 전부에서 100% 일치해,
+// 무거운 IK(전체 14개 조합에 14.7초) 대신 "드럼이 있는 쪽 좌우 위치"만
+// 보는 가벼운 근사로 대체 — 중앙 부근(SIDE_MARGIN 이내)은 양팔 다
+// 가능하다고 보고, 그 밖은 같은 쪽 팔만 가능하다고 본다.
+const SIDE_MARGIN = 0.05;
+function _armReachOk(drum, arm) {
+  if (drum.type === 'kick') return true;
+  if (reachDist({ ...drum, arm }) > STICK_REACH) return false;
+  return arm === 'L' ? drum.pos.y > -SIDE_MARGIN : drum.pos.y < SIDE_MARGIN;
+}
+
 // ── 순수 수학 FK: 씬을 건드리지 않고 TCP 위치(URDF 좌표) 반환 ──
 function _pureFK(jointAngles, arm) {
   const path = [
@@ -2821,7 +2838,7 @@ window.validatePattern = function () {
   drumKit.forEach(d => {
     if (d.type === 'kick') { results.push({ lv:'info', msg:`[${d.name}] 킥 — 확장 이벤트 (팔 동작 없음)` }); return; }
     const dist = reachDist(d);
-    if      (dist > STICK_REACH)      results.push({ lv:'err',  msg:`[${d.name}] 도달 불가 (${dist.toFixed(2)}m > ${STICK_REACH}m)` });
+    if      (!_armReachOk(d, d.arm))    results.push({ lv:'err',  msg:`[${d.name}] 도달 불가 (${dist.toFixed(2)}m — 거리 또는 반대편 위치)` });
     else if (dist > STICK_REACH * 0.88) results.push({ lv:'warn', msg:`[${d.name}] 한계 근접 (${dist.toFixed(2)}m)` });
     else                              results.push({ lv:'ok',   msg:`[${d.name}] 도달 가능 (${dist.toFixed(2)}m)` });
   });
@@ -2852,7 +2869,7 @@ window.validatePattern = function () {
         // 반대팔로 두 번째 드럼을 칠 수 있는지 체크
         const d2       = evts[i].drum;
         const distAlt  = reachDist({ ...d2, arm: otherArm });
-        const canAlt   = distAlt <= STICK_REACH;
+        const canAlt   = _armReachOk(d2, otherArm);
         // 해당 타이밍에 반대팔이 이미 쓰이는지
         const beatSec  = evts[i].t;
         const otherBusy = armEvts[otherArm].some(e => Math.abs(e.t - beatSec) < 0.01);
@@ -3443,6 +3460,25 @@ window.testDrumSound = async function (drumType, vel = 'medium') {
   ) };
 };
 
+/** 콘솔 테스트용 — 실제 도달 IK(_solveStickStrike)로 특정 드럼·팔의
+ *  진짜 도달 여부와 소요 시간을 측정. 캐시된 값이면 거의 0ms. */
+window.testReachIK = function (drumId, arm) {
+  const drum = drumKit.find(d => d.id === drumId);
+  if (!drum) return 'no such drum';
+  const t0 = performance.now();
+  const { ok, pose } = _solveStickStrike({ ...drum, arm }, 'medium');
+  const ms = performance.now() - t0;
+  return { drumId, arm, ok, ms: +ms.toFixed(2) };
+};
+window.testReachIKAll = function () {
+  const out = [];
+  drumKit.forEach(d => {
+    if (d.type === 'kick') return;
+    ['L', 'R'].forEach(arm => out.push(window.testReachIK(d.id, arm)));
+  });
+  return out;
+};
+
 // ═══════════════════════════════════════════════════════════════
 //  TCP 궤적 렌더링
 // ═══════════════════════════════════════════════════════════════
@@ -3642,7 +3678,7 @@ function rebuildDrumSpheres() {
 function _updateDrumReachVisual(drum) {
   const mesh = drumMeshes[drum.id];
   if (!mesh || drum.type === 'kick') return;
-  const unreachable = reachDist(drum) > STICK_REACH;
+  const unreachable = !_armReachOk(drum, drum.arm);
   const baseColor = unreachable ? 0xe04040 : DRUM_TYPES[drum.type].color;
   mesh.material.color.set(baseColor);
   mesh.material.emissive.set(baseColor).multiplyScalar(0.20);
@@ -3658,10 +3694,7 @@ function _updateLaneReachTint(drum) {
   if (drum.type === 'kick') return;
   const lane = document.querySelector(`.tl-lane[data-drum-id="${drum.id}"]`);
   if (!lane) return;
-  const reachOk = {
-    L: reachDist({ ...drum, arm: 'L' }) <= STICK_REACH,
-    R: reachDist({ ...drum, arm: 'R' }) <= STICK_REACH,
-  };
+  const reachOk = { L: _armReachOk(drum, 'L'), R: _armReachOk(drum, 'R') };
   lane.classList.toggle('unreachable-L', !reachOk.L);
   lane.classList.toggle('unreachable-R', !reachOk.R);
 }
@@ -5142,8 +5175,8 @@ function renderTimeline() {
     // 표시 — 사용자 피드백: "드럼 위치를 변경했을 때 타격 가능한지가
     // 타임라인에 보여야 한다"(가벼운 방식으로: 레인 자체에 클래스만).
     if (splitArm) {
-      if (reachDist({ ...drum, arm: 'L' }) > STICK_REACH) lane.classList.add('unreachable-L');
-      if (reachDist({ ...drum, arm: 'R' }) > STICK_REACH) lane.classList.add('unreachable-R');
+      if (!_armReachOk(drum, 'L')) lane.classList.add('unreachable-L');
+      if (!_armReachOk(drum, 'R')) lane.classList.add('unreachable-R');
     }
 
     lane.appendChild(_laneGridFragment(div));
@@ -5365,7 +5398,7 @@ function addEvent(drumId, beat, arm) {
     const otherKr  = useArm === 'L' ? '오른팔' : '왼팔';
     // 반대팔로 이 드럼을 칠 수 있는지 체크
     const distOther = reachDist({ ...drum, arm: otherArm });
-    const hint = distOther <= STICK_REACH
+    const hint = _armReachOk(drum, otherArm)
       ? ` — ${otherKr}은 도달 가능(${distOther.toFixed(2)}m)하니 레인 반대쪽 절반을 클릭해보세요`
       : ` (${otherKr}도 도달 불가 ${distOther.toFixed(2)}m)`;
     setStatus(`❌ beat ${beat.toFixed(2)}: ${armKr}은 이미 이 박자에 다른 드럼을 칩니다${hint}`);
