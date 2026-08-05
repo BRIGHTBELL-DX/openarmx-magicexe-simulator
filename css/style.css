@@ -575,6 +575,25 @@ body {
   pointer-events: none;
 }
 
+/* 현재 드럼 위치 기준 팔별 도달 불가 표시 — 개별 타격점마다 클래스를
+   토글하는 대신 레인 자체 위/아래 절반을 붉게 물들인다(사용자 피드백:
+   "해당 라인 자체에 타격 불가 느낌으로, 더 가벼운 방식으로 — 왼팔
+   오른팔 구분되어 있으니까"). 레인 하나당 클래스 토글 2개뿐이라 타격점
+   개수와 무관하게 항상 가볍다. */
+.tl-lane.unreachable-L:not(.unreachable-R) {
+  background: linear-gradient(to bottom,
+    rgba(255,45,45,0.20) 0%, rgba(255,45,45,0.20) 50%,
+    transparent 50%, transparent 100%);
+}
+.tl-lane.unreachable-R:not(.unreachable-L) {
+  background: linear-gradient(to bottom,
+    transparent 0%, transparent 50%,
+    rgba(255,45,45,0.20) 50%, rgba(255,45,45,0.20) 100%);
+}
+.tl-lane.unreachable-L.unreachable-R {
+  background: rgba(255,45,45,0.20);
+}
+
 /* ── 퍼포먼스 트랙(드럼을 안 치는 구간의 연출 동작) ── */
 .tl-perf-label { color: #bb66ff !important; }
 .tl-perf-lane {

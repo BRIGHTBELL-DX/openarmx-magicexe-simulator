@@ -3648,6 +3648,24 @@ function _updateDrumReachVisual(drum) {
   mesh.material.emissive.set(baseColor).multiplyScalar(0.20);
 }
 
+// 드럼 스피어 색과 같은 순간에, 타임라인 레인 자체의 위/아래 절반(왼팔/
+// 오른팔)을 붉게 물들여 "이 팔로는 지금 이 드럼을 칠 수 없다"를 표시한다.
+// 개별 타격점(.tl-hit)마다 클래스를 토글하던 첫 버전은 히트가 수백~천 개인
+// 레인에서 드래그 중 매 프레임 순회하는 게 부담이라는 지적(더 가벼운
+// 방식 요청)에 따라, 레인 엘리먼트 자체에 클래스 2개만 토글하는 방식으로
+// 단순화 — 타격점 개수와 무관하게 항상 O(1)이다.
+function _updateLaneReachTint(drum) {
+  if (drum.type === 'kick') return;
+  const lane = document.querySelector(`.tl-lane[data-drum-id="${drum.id}"]`);
+  if (!lane) return;
+  const reachOk = {
+    L: reachDist({ ...drum, arm: 'L' }) <= STICK_REACH,
+    R: reachDist({ ...drum, arm: 'R' }) <= STICK_REACH,
+  };
+  lane.classList.toggle('unreachable-L', !reachOk.L);
+  lane.classList.toggle('unreachable-R', !reachOk.R);
+}
+
 // ── 재생 상태 ────────────────────────────────────────────────
 let isPlaying   = false;
 let startWall   = 0, pauseOffset = 0;
@@ -4685,6 +4703,7 @@ renderer.domElement.addEventListener('mousemove', e => {
     if (grp) grp.position.set(drum.pos.x, drum.pos.y, drum.pos.z);
 
     _updateDrumReachVisual(drum);   // 드래그 중에도 도달 불가 시 즉시 빨간색으로
+    _updateLaneReachTint(drum);     // 타임라인 레인 반쪽 색도 같이 갱신
 
     // 패널 숫자 입력 즉시 반영
     const item = document.querySelector(`.drum-row[data-id="${drum.id}"]`);
@@ -4712,7 +4731,7 @@ renderer.domElement.addEventListener('mouseup', () => {
     _checkTemplateDirty();
     renderDrumList();
     const dragged = drumKit.find(d => d.id === _dragDrumId);
-    if (dragged) _updateDrumReachVisual(dragged);
+    if (dragged) { _updateDrumReachVisual(dragged); _updateLaneReachTint(dragged); }
     _playKFs = buildFinalKeyframes();
     _playDur = _playKFs.totalTime;
     _dragDrumId = null;
@@ -5118,6 +5137,14 @@ function renderTimeline() {
     lane.style.width     = totalW + 'px';
     lane.dataset.drumId  = drum.id;
     const typeInfo = DRUM_TYPES[drum.type] || DRUM_TYPES.snare;
+
+    // 현재 드럼 위치 기준 팔별 도달 가능 여부를 레인 위/아래 절반 색으로
+    // 표시 — 사용자 피드백: "드럼 위치를 변경했을 때 타격 가능한지가
+    // 타임라인에 보여야 한다"(가벼운 방식으로: 레인 자체에 클래스만).
+    if (splitArm) {
+      if (reachDist({ ...drum, arm: 'L' }) > STICK_REACH) lane.classList.add('unreachable-L');
+      if (reachDist({ ...drum, arm: 'R' }) > STICK_REACH) lane.classList.add('unreachable-R');
+    }
 
     lane.appendChild(_laneGridFragment(div));
 
@@ -6031,6 +6058,7 @@ window.updateDrumPos = function (id, axis, val) {
   if (grp) grp.position.set(drum.pos.x, drum.pos.y, drum.pos.z);
 
   _updateDrumReachVisual(drum);   // 전체 재렌더 없이 도달 불가 시 드럼 색만 갱신
+  _updateLaneReachTint(drum);     // 타임라인 레인 반쪽 색도 같이 갱신
 
   // 소수점 2자리로 표시 정규화
   const item = document.querySelector(`.drum-row[data-id="${id}"]`);
