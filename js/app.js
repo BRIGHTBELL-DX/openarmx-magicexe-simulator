@@ -1749,12 +1749,12 @@ function _solveIK(arm, targetUrdf, initAngles, j7, extraLimits) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  드럼채(스틱) — 그리퍼에 45° 고정, 그립점 앞 30cm 돌출
+//  드럼채(스틱) — 그리퍼에 30° 고정, 그립점 앞 30cm 돌출
 // ═══════════════════════════════════════════════════════════════
-// hand 로컬 프레임: 그립점 (0,0,gripZ), 스틱 방향 = 로컬 +X·+Z 합성 45°
-// dirSign=+1 → NEUTRAL(전관절 0)에서 스틱이 이미 전방-하향 45°를 향함
+// hand 로컬 프레임: 그립점 (0,0,gripZ), 스틱 방향 = 로컬 +X·+Z 합성 30°
+// dirSign=+1 → NEUTRAL(전관절 0)에서 스틱이 이미 전방-하향 30°(더 바닥쪽)를 향함
 // (idle·인트로·아웃트로 자세를 건드릴 필요 없이 "기본자세"가 곧 정답)
-const STICK = { fwd: 0.30, back: 0.10, tilt: PI / 4, gripZ: 0.08, dirSign: +1 };
+const STICK = { fwd: 0.30, back: 0.10, tilt: 30 * PI / 180, gripZ: 0.08, dirSign: +1 };
 const STICK_REACH = MAX_REACH + 0.16;
 
 /** hand 링크까지의 FK 행렬 */
@@ -1858,7 +1858,11 @@ const _strikeSolveCache = new Map();
 // 자동으로 무효화됨)가 그대로 일치해 다중 시드 IK를 다시 안 풀어도 된다.
 // 이 IK 자체가 무거워서(도달 배지 계산 기준 실측 3드럼 11.5초) 8드럼
 // 전체를 매번 새로 풀면 새로고침마다 그 시간이 고스란히 걸렸다.
-const _STRIKE_CACHE_STORE = 'openarmx_strike_cache_v1';
+// v2: STICK.tilt(스틱 부착 각도)를 45°→30°로 바꿔 캐시 키에 없는 전역
+// 상수가 바뀌었다 — 예전 v1 캐시를 그대로 쓰면 새 각도 기준으로 다시
+// 풀어야 할 자세가 낡은(45° 기준) 값으로 나온다. 스토어 이름을 바꿔
+// 자동으로 전부 새로 풀리게 한다.
+const _STRIKE_CACHE_STORE = 'openarmx_strike_cache_v2';
 try {
   const _rawStrikeCache = localStorage.getItem(_STRIKE_CACHE_STORE);
   if (_rawStrikeCache) {
@@ -3054,7 +3058,7 @@ CHAIN.forEach(lk => { (lk.parent ? groups[lk.parent] : sceneRoot).add(groups[lk.
 const tcpGeo = new THREE.SphereGeometry(0.013, 8, 8);
 ['L_tcp','R_tcp'].forEach(n => groups[n].add(new THREE.Mesh(tcpGeo, MAT.tcp.clone())));
 
-// ── 드럼채 (그리퍼 45° 고정, 팁쪽 테이퍼) ──────────────────────
+// ── 드럼채 (그리퍼 30° 고정, 팁쪽 테이퍼) ──────────────────────
 ['L','R'].forEach(s => {
   const grp = groups[`${s}_hand`];
   const sin = Math.sin(STICK.tilt), cos = Math.cos(STICK.tilt);
