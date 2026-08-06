@@ -27,12 +27,46 @@ const VEL_SCALE = {
   soft:   { raiseZ: 0.35, j7Strike: 0.40, rebZ: 0.30, j4: -0.10 },
   medium: { raiseZ: 1.00, j7Strike: 1.00, rebZ: 1.00, j4:  0.00 },
   hard:   { raiseZ: 1.80, j7Strike: 1.55, rebZ: 1.75, j4: +0.14 },
+  // "최강" — 손목(J7) 코킹 폭 자체는 hard와 동일. 대신 raise 자세에
+  // J1·J4까지 크게 움직이는 별도 메커니즘(_maxRaiseBoost, computeStrikePose
+  // 참고)을 추가로 얹어 "팔 전체를 크게 들었다 내려친다"는 실루엣을 낸다.
+  max:    { raiseZ: 1.80, j7Strike: 1.55, rebZ: 1.75, j4: +0.14 },
 };
 const VEL_GLOW = {
   soft:   c => `0 0 3px ${c}44`,
   medium: c => `0 0 6px ${c}66`,
   hard:   c => `0 0 11px ${c}bb`,
+  max:    c => `0 0 10px ${c}cc, 0 0 18px #ffcc0099`,
 };
+
+// ═══════════════════════════════════════════════════════════════
+//  "최강" 타격 — 팔 전체를 크게 들어 내려치는 강조 타격 (2026-08-06)
+// ═══════════════════════════════════════════════════════════════
+// 실제 URDF 조인트 한계(사용자가 실측한 조인트 슬라이더 범위) — IK 풀이용
+// _IK_LIMITS(좁은 범위, 일반 타격의 "작고 안전한 스윙"용)와는 다른 값.
+// 성능 클립(PERF_*)들은 이미 이 넓은 범위를 직접 값으로 써왔다 — 최강
+// 타격의 raise 보정도 같은 실제 한계 안에서 움직여야 한다.
+const _HW_LIMITS = {
+  L1:[-3.34, 0.91], L2:[-3.27, 0.13], L3:[-1.57, 1.57], L4:[0.00, 1.80], L5:[-1.50, 1.50], L6:[-0.75, 0.75], L7:[-1.40, 1.40],
+  R1:[-0.91, 3.34], R2:[-0.13, 3.27], R3:[-1.57, 1.57], R4:[0.00, 1.80], R5:[-1.50, 1.50], R6:[-0.75, 0.75], R7:[-1.40, 1.40],
+};
+// J1(몸통 방향)을 최대 이만큼, J4(팔꿈치)를 최대 이만큼 더 움직여 "크게
+// 들어올린" raise 자세를 만든다 — 실제로 얼마나 움직일지는 드럼마다
+// 다르다(_maxRaiseBoost가 매번 그 드럼의 strike 해를 기준으로 다시 계산 +
+// 다른 드럼과의 거리 검사를 하며 안전한 만큼만 적용).
+const MAX_RAISE_J1_BOOST = 0.40;
+const MAX_RAISE_J4_DROP  = 0.25;
+// "최강" 타격 진입에 필요한 절대시간 — 일반 타격(preDur, 약 0.12~0.32초)
+// 보다 훨씬 크다. MAX_SWING_DUR: 크게 든 raise 자세→실제 타격 자세로
+// 내려오는 마지막 스윙 구간. MAX_HOLD_DUR: 대기 자세→raise 자세로 다가가는
+// 구간. 관절 한계상 이 정도는 필요(위 J1·J4 보정폭 기준 여유 있게 계산).
+const MAX_SWING_DUR = 0.80;
+const MAX_HOLD_DUR  = 1.30;
+// 같은 팔에서 "최강" 타격 앞에는 최소 이만큼(MAX_HOLD_DUR+MAX_SWING_DUR)
+// 다른 타격이 없어야 한다 — 부족하면 위 진입 동작을 다 밟을 시간이 없어
+// 관절이 과속하거나 키프레임 순서가 꼬인다. addEvent 등 배치 시점에 이
+// 여유를 강제한다(부족하면 배치를 막는다).
+const MAX_GUARD_TIME = MAX_HOLD_DUR + MAX_SWING_DUR;
 
 // ═══════════════════════════════════════════════════════════════
 //  드럼 키트 상태
@@ -2090,6 +2124,50 @@ function _solveStickStrike(drum, vel) {
   return result;
 }
 
+/** 스틱 팁이 (제외할 드럼 자신 말고) 다른 어떤 드럼과도 THRESH 이상
+ *  떨어져 있는지 — "최강" raise 보정이 다른 드럼을 스치지 않는지 확인. */
+function _maxRaiseClearanceOk(tip, excludeDrumId) {
+  const THRESH = 0.15;
+  return drumKit.every(d => {
+    if (d.id === excludeDrumId || d.type === 'kick') return true;
+    const dx = tip.x - d.pos.x, dy = tip.y - d.pos.y, dz = tip.z - d.pos.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz) >= THRESH;
+  });
+}
+
+/** "최강" raise 자세 보정 — J1(몸통 방향)을 "스틱 팁이 더 높아지는" 방향
+ *  으로, 다른 드럼과의 거리가 안전한 한도까지 조금씩 밀어붙이고(probe,
+ *  MIN_PEAK_Y와 동일한 발상), J4(팔꿈치)도 같은 방식으로 좀 더 편다.
+ *  드럼마다 그 드럼의 strike 해를 기준으로 매번 새로 계산되므로 고정된
+ *  하나의 자세가 아니라 "그 드럼 위에서 크게 든" 자세가 드럼별로 나온다. */
+function _maxRaiseBoost(pose, s, drum) {
+  const j1Key = `${s}1`, j4Key = `${s}4`;
+  const [j1Lo, j1Hi] = _HW_LIMITS[j1Key];
+  const [j4Lo, j4Hi] = _HW_LIMITS[j4Key];
+  const probeStep = 0.05;
+
+  // J1 — 팁이 더 높아지는(world Y가 더 커지는) 방향을 탐색해 그 방향으로만 전진
+  const baseTip  = _pureFKStick(pose, s).tip;
+  const probeV   = clamp(pose[j1Key] + probeStep, j1Lo, j1Hi);
+  const probeTip = _pureFKStick({ ...pose, [j1Key]: probeV }, s).tip;
+  const dir = Math.sign(probeTip.y - baseTip.y) || 1;
+  let curV = pose[j1Key];
+  const maxSteps = Math.round(MAX_RAISE_J1_BOOST / probeStep);
+  for (let i = 0; i < maxSteps; i++) {
+    const nextV = clamp(curV + dir * probeStep, j1Lo, j1Hi);
+    if (nextV === curV) break;   // 관절 한계 도달
+    const testTip = _pureFKStick({ ...pose, [j1Key]: nextV }, s).tip;
+    if (!_maxRaiseClearanceOk(testTip, drum.id)) break;   // 다른 드럼에 근접 — 여기서 멈춤
+    curV = nextV;
+  }
+  pose[j1Key] = curV;
+
+  // J4 — 팔꿈치를 펴는(값을 줄이는) 방향으로 같은 방식 검증 후 적용
+  const j4Target  = clamp(pose[j4Key] - MAX_RAISE_J4_DROP, j4Lo, j4Hi);
+  const j4TestTip = _pureFKStick({ ...pose, [j4Key]: j4Target }, s).tip;
+  if (_maxRaiseClearanceOk(j4TestTip, drum.id)) pose[j4Key] = j4Target;
+}
+
 function computeStrikePose(drum, phase, vel = 'medium') {
   const s     = drum.arm;
   const style = DRUM_TYPES[drum.type]?.style || 'full';
@@ -2128,9 +2206,14 @@ function computeStrikePose(drum, phase, vel = 'medium') {
     pose[`${s}7`] = nominal + (j7Phase - nominal) * cockScale + delta;
   }
 
+  // "최강" — raise 단계에서만 팔 전체(J1·J4)를 추가로 크게 들어올린다.
+  // strike·rebound는 건드리지 않아 타격점·잔향은 그대로다.
+  if (phase === 'raise' && vel === 'max') {
+    _maxRaiseBoost(pose, s, drum);
+  }
+
   return pose;
 }
-
 // ═══════════════════════════════════════════════════════════════
 //  타임라인 → 키프레임 빌드 (L·R 팔 완전 분리 트랙)
 // ═══════════════════════════════════════════════════════════════
@@ -2269,15 +2352,30 @@ function buildKeyframes() {
       // 끊긴 것 — 이 타격은 (퍼포먼스가 끝난 뒤) 새로 raise부터 시작해야
       // 한다(hasPrev=false 취급).
       const prevEvt  = armEvts[arm][idx - 1];
-      const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t);
-      let raiseT     = parseFloat(Math.max(0.001, t - preDur).toFixed(3));
+      // "최강"(vel==='max') 타격은 퍼포먼스 직후 타격과 똑같이 취급한다
+      // — 관절 한계상 훨씬 큰 진입 동작(MAX_HOLD_DUR+MAX_SWING_DUR)이
+      // 필요해서, 이전 타격과 관절각을 평균하는 경유점(via-point) 체인
+      // 로직 대신 항상 "새로 raise부터 시작"하는 이 분기(hasPrev=false)를
+      // 타게 한다. 배치 시점에 MAX_GUARD_TIME만큼 앞에 다른 타격이 없도록
+      // 강제되므로(addEvent 등) 이 가정이 안전하다.
+      const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t) && vel !== 'max';
+      let raiseT     = parseFloat(Math.max(0.001, t - (vel === 'max' ? MAX_SWING_DUR : preDur)).toFixed(3));
       const reboundT = parseFloat((t + typeInfo.rebDur).toFixed(3));
 
       const rawNext = armEvts[arm][idx + 1];
-      // 다음 타격과의 사이에 퍼포먼스 구간이 끼어 있으면 경유점(via-point)
-      // 체인으로 잇지 않는다 — 이 타격이 (퍼포먼스 전) 마지막 타격인 것처럼
-      // rebound 후 대기하다가 퍼포먼스로 넘어가야 한다.
-      const next = (rawNext && !_perfBetween(t, rawNext.t)) ? rawNext : null;
+      // 다음 타격과의 사이에 퍼포먼스 구간이 끼어 있거나, 다음 타격이
+      // "최강"이면(위와 같은 이유) 경유점(via-point) 체인으로 잇지 않는다
+      // — 이 타격이 (그 전) 마지막 타격인 것처럼 rebound 후 대기하다가
+      // 다음 구간으로 넘어가야 한다.
+      const next = (rawNext && !_perfBetween(t, rawNext.t) && rawNext.vel !== 'max') ? rawNext : null;
+      // next를 null로 취급해도(위) "이 팔의 마지막 타격"으로 오인해 아래
+      // else 분기(대기 홀드)가 곡 끝까지 채워지면 안 된다 — 실제로는 뒤에
+      // "최강" 타격이 있으니 그 타격의 진입 시작 시각(holdT 근사) 전까지만
+      // 채워야 한다(실측 확인: 이 캡이 없으면 최강 타격의 접근 구간에
+      // 대기용 keyframe이 겹쳐 튀는 현상이 있었다).
+      const nextMaxHoldStart = (rawNext && rawNext.vel === 'max')
+        ? rawNext.t - MAX_SWING_DUR - MAX_HOLD_DUR
+        : Infinity;
 
       // 다음 타격이 있으면 rebound 생략 — rebound가 현재 드럼 바로 위로 팔을 들어
       // strike → rebound → via-point 순서가 되면 ㄷ자 경로가 됨.
@@ -2298,12 +2396,52 @@ function buildKeyframes() {
           .reduce((max, sp) => Math.max(max, sp.end), 0);
         if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
         const holdStart = precedingPerfEnd;
-        const holdT = parseFloat(Math.max(holdStart, raiseT - APPROACH_DUR).toFixed(3));
+        const holdT = parseFloat(Math.max(holdStart, raiseT - (vel === 'max' ? MAX_HOLD_DUR : APPROACH_DUR)).toFixed(3));
         if (holdT > holdStart + 0.001) {
           addBreathingHold(poseMap, preLift[arm], holdStart, holdT, sideKeys);
           addPose(poseMap, holdT, preLift[arm], sideKeys);
         }
-        addPose(poseMap, raiseT, computeStrikePose(drum, 'raise', vel), sideKeys);
+        const raisePoseForApproach = computeStrikePose(drum, 'raise', vel);
+        addPose(poseMap, raiseT, raisePoseForApproach, sideKeys);
+        // "최강"은 대기 자세(preLift)→boosted raise 구간도 각도 변화폭이
+        // 커서, holdT 쪽 접선이 preLift에 끌려 raiseT 부근에서 다시 몰아치는
+        // 현상이 있었다(위 raise→strike와 같은 원리) — 여기도 균등 분할.
+        if (vel === 'max' && holdT > holdStart + 0.001) {
+          const STEPS_A = 5;
+          for (let i = 1; i < STEPS_A; i++) {
+            const frac = i / STEPS_A;
+            const stepT = parseFloat((holdT + (raiseT - holdT) * frac).toFixed(3));
+            if (stepT <= holdT || stepT >= raiseT) continue;
+            const stepPose = {};
+            sideKeys.forEach(k => {
+              stepPose[k] = preLift[arm][k] + (raisePoseForApproach[k] - preLift[arm][k]) * frac;
+            });
+            addPose(poseMap, stepT, stepPose, sideKeys);
+          }
+        }
+        // "최강"은 raise(boosted)→strike 구간이 관절 각도상 다른 타격보다
+        // 훨씬 크다(J1·J4까지 포함) — Catmull-Rom은 등속이 아니라서 이
+        // 구간 시간(MAX_SWING_DUR)을 다 줘도 실측해보니 두 점만으로는
+        // 앞부분에서 훨씬 빠르게 몰아치고 뒷부분은 밋밋해지는 현상이
+        // 있었다(양 끝 홀드/타격 자세에 접선이 끌려 휘어짐 — 경유점 하나만
+        // 추가해서도 그 경유점 자리에서 다시 튀는 걸로 확인됨). 이 구간을
+        // 관절각 기준으로 균등 분할한 여러 점으로 채워 사실상 선형에
+        // 가깝게 만들면 스플라인이 어느 한 곳에 쏠릴 여지가 없다.
+        if (vel === 'max') {
+          const strikePoseForRaise = computeStrikePose(drum, 'strike', vel);
+          const raisePose = computeStrikePose(drum, 'raise', vel);
+          const STEPS = 5;
+          for (let i = 1; i < STEPS; i++) {
+            const frac = i / STEPS;
+            const stepT = parseFloat((raiseT + (t - raiseT) * frac).toFixed(3));
+            if (stepT <= raiseT || stepT >= t) continue;
+            const stepPose = {};
+            sideKeys.forEach(k => {
+              stepPose[k] = raisePose[k] + (strikePoseForRaise[k] - raisePose[k]) * frac;
+            });
+            addPose(poseMap, stepT, stepPose, sideKeys);
+          }
+        }
       }
       addPose(poseMap, t, computeStrikePose(drum, 'strike', vel), sideKeys, true);
       // rebound 직후 바로 퍼포먼스가 이어지면(간격이 rebDur보다 좁으면)
@@ -2333,7 +2471,12 @@ function buildKeyframes() {
         // 만나는 것으로 자동 축소된다.
         const gap   = next.t - t;
         const peakT = parseFloat((t + Math.min(preDur, gap / 2)).toFixed(3));
-        const posA  = computeStrikePose(drum,      'raise', vel);
+        // "최강"(vel==='max')이라도 여기서는 boosted raise가 아니라 보통
+        // raise를 기준으로 삼는다 — 이 posA는 "다음 타격으로 넘어가는
+        // 경유점(peak)" 계산용이지 이 타격 자체의 진입 자세가 아니다.
+        // boosted 값을 그대로 쓰면 rebound 직후 다음 타격으로 넘어가는
+        // 구간에 엉뚱하게 팔이 다시 크게 들리는 현상이 생긴다(실측 확인).
+        const posA  = computeStrikePose(drum,      'raise', vel === 'max' ? 'hard' : vel);
         const posB  = computeStrikePose(next.drum, 'raise', next.vel ?? 'medium');
         const peak  = {};
         sideKeys.forEach(k => {
@@ -2503,7 +2646,7 @@ function buildKeyframes() {
         // 그 퍼포먼스가 시작하기 전까지만 채워야 한다 — 안 그러면 대기
         // 홀드가 퍼포먼스 시작 이후 시각까지 키프레임을 찍어 순서가
         // 뒤섞인다(퍼포먼스 자체 키프레임은 이 뒤에서 별도로 채워짐).
-        const cap = Math.min(totalTime - APPROACH_DUR, followingPerfStart - APPROACH_DUR);
+        const cap = Math.min(totalTime - APPROACH_DUR, followingPerfStart - APPROACH_DUR, nextMaxHoldStart - 0.05);
         const holdEndT = parseFloat(Math.max(effectiveReboundT, cap).toFixed(3));
         if (holdEndT > effectiveReboundT) {
           addBreathingHold(poseMap, preLift[arm], effectiveReboundT, holdEndT, sideKeys);
@@ -3205,7 +3348,11 @@ const _MAX_VOICES_PER_TYPE = 5;
 const _activeVoices = {};   // { [type]: Array<{src, gain, ctx}> }
 
 function _playDrumSample(type, vel, ctx, dest) {
-  const buf = _drumSampleBuffers[type]?.[vel] || _drumSampleBuffers[type]?.medium;
+  // "최강"(max)은 샘플 자체가 따로 없다 — hard(강) 샘플을 그대로 재사용
+  // (모션만 다르고 타격점·소리 세기는 hard와 동일하게 설계했다).
+  const buf = _drumSampleBuffers[type]?.[vel]
+    || _drumSampleBuffers[type]?.hard
+    || _drumSampleBuffers[type]?.medium;
   if (!buf) return false;
 
   const voices = _activeVoices[type] || (_activeVoices[type] = []);
@@ -4808,7 +4955,7 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
   hit.style.left     = x + 'px';
   hit.style.background  = typeInfo.color;
   hit.style.boxShadow   = VEL_GLOW[vel](typeInfo.color);
-  const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
+  const velLabel = { soft:'약', medium:'중', hard:'강', max:'최강' }[vel];
   const armLabel = effArm === 'L' ? '왼팔' : effArm === 'R' ? '오른팔' : '';
   hit.title = `${drum.name} — beat ${evt.beat.toFixed(2)} [${velLabel}]${armLabel ? ' · ' + armLabel : ''}  (드래그: 박자 이동 / 클릭: 강도 변경 / 더블클릭: 타격 팔 변경 / 우클릭: 삭제)`;
   hit.addEventListener('click', e => {
@@ -4853,6 +5000,10 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
       if (Math.abs(me.clientX - startX) > 3) moved = true;
       const newBeat = beatAt(me.clientX);
       if (_isBeatInPerf(newBeat)) return; // 퍼포먼스 구간엔 놓을 수 없음
+      // "최강" 타격(또는 그 근처로 옮기려는 타격)은 가드 구간을 침해하면
+      // 이동을 막는다 — addEvent와 동일한 제약(_maxHitGuardBlocked).
+      const dragExcludeKey = `${drum.id}_${evt.beat}_${effArm}`;
+      if (_maxHitGuardBlocked(effArm, newBeat, evt.vel ?? 'medium', dragExcludeKey)) return;
       if (newBeat !== evt.beat) {
         evt.beat = newBeat;
         hit.style.left   = ((evt.beat - 1) * PX_PER_BEAT) + 'px';
@@ -5357,6 +5508,29 @@ function _isBeatInPerf(beat) {
   return _perfOccupiedBeatRanges().some(r => beat >= r.start && beat < r.end);
 }
 
+/** "최강"(vel==='max') 타격은 진입에 훨씬 큰 시간(MAX_GUARD_TIME)이
+ *  필요해, 같은 팔의 다른 타격이 그만큼 가까이 있으면 배치/변경을 막는다.
+ *  new(배치하려는 것)와 기존 이벤트 중 어느 한쪽이라도 vel==='max'면
+ *  검사한다(양방향 보호) — excludeKey는 자기 자신 제외용
+ *  `${drumId}_${beat}_${arm}`. */
+function _maxHitGuardBlocked(arm, beat, vel, excludeKey) {
+  // 실측(1.3배 여유를 준 MAX_HOLD_DUR·MAX_SWING_DUR로도 정확히 경계값에
+  // 걸치면 이전 타격의 rebound 키프레임과 내 hold 키프레임이 거의 같은
+  // 시각에 겹쳐 순간적으로 튀는 현상이 실측 확인됐다 — 배치 차단 기준은
+  // 실제 필요 시간(MAX_GUARD_TIME)보다 20% 더 넉넉하게 잡는다.
+  const guardBeats = (MAX_GUARD_TIME * 1.2) / (60 / bpm);
+  return timelineEvents.some(e => {
+    if (e.type === 'perf') return false;
+    const d = drumKit.find(dd => dd.id === e.drumId);
+    if (!d || d.type === 'kick') return false;
+    const eArm = e.arm ?? d.arm;
+    if (eArm !== arm) return false;
+    if (`${e.drumId}_${e.beat}_${eArm}` === excludeKey) return false;
+    if (vel !== 'max' && e.vel !== 'max') return false;
+    return Math.abs(e.beat - beat) < guardBeats;
+  });
+}
+
 // arm을 명시하면(레인의 클릭된 절반) 그 팔로 배치, 생략하면 드럼 기본 팔 사용.
 function addEvent(drumId, beat, arm) {
   // 퍼포먼스 구간에 겹치는 타격은 무시 — 그 구간의 팔 자세는 퍼포먼스가
@@ -5419,6 +5593,15 @@ function addEvent(drumId, beat, arm) {
   );
   if (bothArmsUsed) {
     setStatus(`❌ beat ${beat.toFixed(2)}: 동일 타이밍은 양팔 각 1개씩 최대 2개까지만 가능합니다`);
+    return;
+  }
+
+  // ── 규칙 3: "최강" 타격은 진입에 큰 시간이 필요 — 같은 팔의 다른
+  // 타격이 MAX_GUARD_TIME보다 가까우면(이 타격이 최강이거나, 근처에
+  // 이미 최강 타격이 있으면) 배치 불가.
+  if (_maxHitGuardBlocked(useArm, beat, defaultVel, null)) {
+    const armKr = useArm === 'L' ? '왼팔' : '오른팔';
+    setStatus(`❌ beat ${beat.toFixed(2)}: "최강" 타격은 ${armKr}의 다른 타격과 최소 ${MAX_GUARD_TIME.toFixed(1)}초 이상 떨어져 있어야 합니다`);
     return;
   }
 
@@ -5637,6 +5820,16 @@ function applyVel(drumId, beat, arm) {
   const evt = timelineEvents.find(e =>
     e.drumId === drumId && Math.abs(e.beat - beat) < 0.01 && (arm == null || _effArm(e) === arm));
   if (!evt) return;
+  const d = drumKit.find(dd => dd.id === drumId);
+  const effArm = arm ?? (d ? _effArm(evt) : null);
+  if (d && d.type !== 'kick' && defaultVel === 'max') {
+    const excludeKey = `${drumId}_${beat}_${effArm}`;
+    if (_maxHitGuardBlocked(effArm, beat, 'max', excludeKey)) {
+      const armKr = effArm === 'L' ? '왼팔' : '오른팔';
+      setStatus(`❌ beat ${beat.toFixed(2)}: "최강"으로 바꾸려면 ${armKr}의 다른 타격과 최소 ${MAX_GUARD_TIME.toFixed(1)}초 이상 떨어져 있어야 합니다`);
+      return;
+    }
+  }
   evt.vel = defaultVel;
   _commitTimeline();
   if (!isPlaying) renderFrame(pauseOffset);
@@ -5645,7 +5838,7 @@ function applyVel(drumId, beat, arm) {
 // 타임라인 상단 모드 버튼 클릭 핸들러
 window.setDefaultVel = function (vel) {
   defaultVel = vel;
-  ['soft','medium','hard'].forEach(v => {
+  ['soft','medium','hard','max'].forEach(v => {
     document.getElementById(`vel-mode-${v}`)?.classList.toggle('active', v === vel);
   });
 };
@@ -5686,7 +5879,7 @@ window.previewDrumHit = function (drumId, vel = 'medium') {
   if (!_trailOn) { _trailOn = true; document.getElementById('btn-trail')?.classList.add('on'); }
   clearTCPTrails();
 
-  const velLabel = { soft:'약', medium:'중', hard:'강' }[vel];
+  const velLabel = { soft:'약', medium:'중', hard:'강', max:'최강' }[vel];
   setStatus(`[${drum.name}] ${drum.arm === 'L' ? '왼팔' : '오른팔'} 미리보기 (${velLabel}) — 거리 ${reachDist(drum).toFixed(2)}m`);
 
   const phases = [
@@ -6063,6 +6256,7 @@ function renderDrumList() {
     <button class="dvp-btn dvp-soft"   onclick="previewDrumHit('${drum.id}','soft')"   title="약 미리보기 (TCP 경로 표시)">약</button>
     <button class="dvp-btn dvp-medium" onclick="previewDrumHit('${drum.id}','medium')" title="중 미리보기 (TCP 경로 표시)">중</button>
     <button class="dvp-btn dvp-hard"   onclick="previewDrumHit('${drum.id}','hard')"   title="강 미리보기 (TCP 경로 표시)">강</button>
+    <button class="dvp-btn dvp-max"    onclick="previewDrumHit('${drum.id}','max')"    title="최강 미리보기 (팔 전체를 크게 들어올림)">최강</button>
   </div>
   <span class="drum-autogen-chk"></span>
   <button class="drum-del-btn" onclick="deleteDrum('${drum.id}')" title="삭제">✕</button>
