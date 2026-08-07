@@ -40,33 +40,85 @@ const VEL_GLOW = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  "최강" 타격 — 팔 전체를 크게 들어 내려치는 강조 타격 (2026-08-06)
+//  "최강" 타격 — 팔 전체를 크게 들어 내려치는 강조 타격 (2026-08-06, v2)
 // ═══════════════════════════════════════════════════════════════
+// ⚠ v1(작은 고정폭 J1±0.4/J4±0.25 보정)은 사용자 실측 결과 "전혀 원하는
+// 바가 아니다" — 사용자가 제시한 극단적 조인트 값(J1 -1.63 등, ready
+// 대비 델타 약 1.67)에 근접하는 게 핵심인데 v1은 그 근처에도 못 갔다.
+// v2 1차 시도(관절 한계 _HW_LIMITS 끝까지 밀어붙임)는 더 위험한 문제가
+// 있었다 — xstrike 인트로 스타일 작업 때 실측으로 확인된 사실: 관절
+// 한계 바로 앞(여유 0.32°)까지 접근하면 실물에서 토크 폴트가 난다. 반면
+// 사용자가 제시한 값(J1 -1.63)은 L1 한계([-3.34, 0.91])의 중간 근처로,
+// 한계 자체가 아니라 "한계 근처의 안전한 큰 각도"였다. 그래서 최종적으로
+// 관절 한계가 아니라 사용자가 준 값의 크기(MAX_RAISE_J1_TARGET)를
+// 목표로 삼고, 실제 관절 한계에서는 안전 여유(HW_SAFETY_MARGIN)를 항상
+// 남긴다 — 드럼마다 도달 방향(부호)은 다르지만 크기는 항상 그 근처에
+// 최대한 근접시킨다("드럼키트마다 극단적인 각도의 근사치 유지"가 최우선).
+//
 // 실제 URDF 조인트 한계(사용자가 실측한 조인트 슬라이더 범위) — IK 풀이용
 // _IK_LIMITS(좁은 범위, 일반 타격의 "작고 안전한 스윙"용)와는 다른 값.
-// 성능 클립(PERF_*)들은 이미 이 넓은 범위를 직접 값으로 써왔다 — 최강
-// 타격의 raise 보정도 같은 실제 한계 안에서 움직여야 한다.
+// 성능 클립(PERF_*)들은 이미 이 넓은 범위를 직접 값으로 써왔다.
 const _HW_LIMITS = {
   L1:[-3.34, 0.91], L2:[-3.27, 0.13], L3:[-1.57, 1.57], L4:[0.00, 1.80], L5:[-1.50, 1.50], L6:[-0.75, 0.75], L7:[-1.40, 1.40],
   R1:[-0.91, 3.34], R2:[-0.13, 3.27], R3:[-1.57, 1.57], R4:[0.00, 1.80], R5:[-1.50, 1.50], R6:[-0.75, 0.75], R7:[-1.40, 1.40],
 };
-// J1(몸통 방향)을 최대 이만큼, J4(팔꿈치)를 최대 이만큼 더 움직여 "크게
-// 들어올린" raise 자세를 만든다 — 실제로 얼마나 움직일지는 드럼마다
-// 다르다(_maxRaiseBoost가 매번 그 드럼의 strike 해를 기준으로 다시 계산 +
-// 다른 드럼과의 거리 검사를 하며 안전한 만큼만 적용).
-const MAX_RAISE_J1_BOOST = 0.40;
-const MAX_RAISE_J4_DROP  = 0.25;
-// "최강" 타격 진입에 필요한 절대시간 — 일반 타격(preDur, 약 0.12~0.32초)
-// 보다 훨씬 크다. MAX_SWING_DUR: 크게 든 raise 자세→실제 타격 자세로
-// 내려오는 마지막 스윙 구간. MAX_HOLD_DUR: 대기 자세→raise 자세로 다가가는
-// 구간. 관절 한계상 이 정도는 필요(위 J1·J4 보정폭 기준 여유 있게 계산).
-const MAX_SWING_DUR = 0.80;
-const MAX_HOLD_DUR  = 1.30;
-// 같은 팔에서 "최강" 타격 앞에는 최소 이만큼(MAX_HOLD_DUR+MAX_SWING_DUR)
-// 다른 타격이 없어야 한다 — 부족하면 위 진입 동작을 다 밟을 시간이 없어
-// 관절이 과속하거나 키프레임 순서가 꼬인다. addEvent 등 배치 시점에 이
-// 여유를 강제한다(부족하면 배치를 막는다).
-const MAX_GUARD_TIME = MAX_HOLD_DUR + MAX_SWING_DUR;
+// 실제 하드웨어 한계 바로 앞까지 가지 않도록 항상 남겨두는 여유 — xstrike
+// 작업 때 한계 여유 0.32°에서 실제 토크 폴트가 났던 이력 반영(넉넉하게
+// 약 14° 상당의 여유를 둔다).
+const HW_SAFETY_MARGIN = 0.25;
+// 사용자가 실측 제시한 극단 자세 기준 — 실제로 극단적이었던 건 J1(ready
+// 대비 델타 약 1.67)이었다. J4는 참고 자세에서도 1.36으로, 일반 타격의
+// J4(대략 0.6~1.25대)와 비교하면 그렇게까지 극단적이지 않았다 — 그래서
+// J1은 "절대값 목표"(드럼과 무관하게 항상 이 크기에 근접, 방향만 probe로
+// 결정)로, J4는 "그 드럼 strike 값 대비 상대적 감소폭"으로 다르게
+// 접근한다. 관절 한계가 아니라 이 크기를 목표로 삼아 접근한다(모자라면
+// 다른 드럼과의 거리 제한으로 덜 갈 수는 있어도, 목표 자체가 한계보다
+// 항상 작아 "한계 근접" 위험은 없다).
+const MAX_RAISE_J1_TARGET = 1.60;
+const MAX_RAISE_J4_DROP   = 0.30;
+// raise 자세에 도달한 뒤 곧장 내려오지 않고 이 자세로 잠깐 버틴다 —
+// "기존 raise→strike 보간과는 다른 느낌"을 만드는 핵심(크게 들어올려
+// 정지했다가 내려치는, 성능 클립 파워 레이즈와 같은 인상). 일반 타격의
+// 코킹(preDur, 0.1~0.3초)과 확실히 구분되도록 충분히 길게 잡는다.
+const MAX_HOLD_PAUSE = 0.35;
+// 관절 속도 한계(_JOINT_MAX_VEL) 대비 실측으로 필요했던 여유 배율 —
+// Catmull-Rom이 앞뒤 자세에 접선이 끌려 구간 앞부분에 몰아치는 현상이
+// 실측 확인됐다(맨 처음 설계 때 최대 25rad/s까지 튀었음). 아래
+// _maxTimingFor의 균등분할 경유점과 함께 써서 안전 마진을 확보한다.
+const MAX_VEL_MARGIN = 2.1;
+const MAX_MIN_DUR = 0.3;   // 델타가 아주 작아도 최소 이만큼은 확보(부자연스러운 순간 이동 방지)
+
+/** fromPose→toPose로 움직이는 데 필요한 최소 안전 시간 — 관절별
+ *  (델타/한계속도)에 여유 배율을 곱한 값 중 최댓값. 드럼마다 보정폭이
+ *  다르므로 고정 상수 대신 매번 이 함수로 역산한다. */
+function _maxTimingFor(fromPose, toPose, sideKeys) {
+  let dur = MAX_MIN_DUR;
+  sideKeys.forEach(k => {
+    const limit = _JOINT_MAX_VEL[k] ?? 1.5;
+    const delta = Math.abs((toPose[k] ?? 0) - (fromPose[k] ?? 0));
+    const needed = (delta / limit) * MAX_VEL_MARGIN;
+    if (needed > dur) dur = needed;
+  });
+  return dur;
+}
+
+/** 특정 드럼·팔로 "최강" 타격을 놓을 때 실제로 필요한 총 진입 시간
+ *  (대기→raise 접근 + 정지 홀드 + raise→strike 스윙) — 드럼마다 보정폭이
+ *  달라 매번 다시 계산한다. 배치 가드(_maxHitGuardBlocked)와
+ *  buildKeyframes의 nextMaxHoldStart 계산에 공통으로 쓰인다. */
+function _maxHitRequiredGap(drumId, arm) {
+  const drum = drumKit.find(d => d.id === drumId);
+  if (!drum) return MAX_HOLD_PAUSE + 2.0;   // 못 찾으면 넉넉히
+  const effDrum  = arm && arm !== drum.arm ? { ...drum, arm } : drum;
+  const sideKeys = effDrum.arm === 'L' ? ['L1','L2','L3','L4','L5','L6','L7'] : ['R1','R2','R3','R4','R5','R6','R7'];
+  const { L: readyL, R: readyR } = _getReadyPoses();
+  const ready = effDrum.arm === 'L' ? readyL : readyR;
+  const raisePose  = computeStrikePose(effDrum, 'raise',  'max');
+  const strikePose = computeStrikePose(effDrum, 'strike', 'max');
+  const holdDur  = _maxTimingFor(ready, raisePose, sideKeys);
+  const swingDur = _maxTimingFor(raisePose, strikePose, sideKeys);
+  return holdDur + MAX_HOLD_PAUSE + swingDur;
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  드럼 키트 상태
@@ -2136,36 +2188,58 @@ function _maxRaiseClearanceOk(tip, excludeDrumId) {
 }
 
 /** "최강" raise 자세 보정 — J1(몸통 방향)을 "스틱 팁이 더 높아지는" 방향
- *  으로, 다른 드럼과의 거리가 안전한 한도까지 조금씩 밀어붙이고(probe,
- *  MIN_PEAK_Y와 동일한 발상), J4(팔꿈치)도 같은 방식으로 좀 더 편다.
- *  드럼마다 그 드럼의 strike 해를 기준으로 매번 새로 계산되므로 고정된
- *  하나의 자세가 아니라 "그 드럼 위에서 크게 든" 자세가 드럼별로 나온다. */
+ *  으로 사용자가 제시한 극단값 크기(MAX_RAISE_J1_TARGET)까지 다가가되,
+ *  실제 관절 한계보다 항상 HW_SAFETY_MARGIN만큼 안쪽에서 멈춘다(probe,
+ *  MIN_PEAK_Y와 동일한 발상 — 다른 드럼과의 거리도 같이 검사). J4(팔꿈치)
+ *  도 같은 방식으로 MAX_RAISE_J4_DROP만큼 상대적으로 편다. 드럼마다 그 드럼의
+ *  strike 해를 기준으로 매번 새로 계산되므로 고정된 하나의 자세가
+ *  아니라 "그 드럼에서 가능한 한 목표 크기에 근접한" 자세가 드럼별로
+ *  나온다. */
 function _maxRaiseBoost(pose, s, drum) {
   const j1Key = `${s}1`, j4Key = `${s}4`;
-  const [j1Lo, j1Hi] = _HW_LIMITS[j1Key];
-  const [j4Lo, j4Hi] = _HW_LIMITS[j4Key];
+  const [j1LoRaw, j1HiRaw] = _HW_LIMITS[j1Key];
+  const [j4LoRaw, j4HiRaw] = _HW_LIMITS[j4Key];
+  // 실제 하드웨어 한계보다 안쪽으로 당긴 "안전 한계" — 이 안에서만 움직인다.
+  const j1Lo = j1LoRaw + HW_SAFETY_MARGIN, j1Hi = j1HiRaw - HW_SAFETY_MARGIN;
+  const j4Lo = j4LoRaw + HW_SAFETY_MARGIN, j4Hi = j4HiRaw - HW_SAFETY_MARGIN;
   const probeStep = 0.05;
+  const maxSteps = Math.ceil((MAX_RAISE_J1_TARGET * 2 + MAX_RAISE_J4_DROP * 2) / probeStep) + 10;
 
-  // J1 — 팁이 더 높아지는(world Y가 더 커지는) 방향을 탐색해 그 방향으로만 전진
+  // J1 — 팁이 더 높아지는(world Y가 더 커지는) 방향을 확인해, 그 방향으로
+  // "목표 크기(MAX_RAISE_J1_TARGET)"에 해당하는 절대값까지 다가간다.
+  // 안전 한계 또는 다른 드럼과의 최소거리 중 먼저 걸리는 데서 멈춘다.
   const baseTip  = _pureFKStick(pose, s).tip;
   const probeV   = clamp(pose[j1Key] + probeStep, j1Lo, j1Hi);
   const probeTip = _pureFKStick({ ...pose, [j1Key]: probeV }, s).tip;
   const dir = Math.sign(probeTip.y - baseTip.y) || 1;
+  const j1Target = clamp(dir * MAX_RAISE_J1_TARGET, j1Lo, j1Hi);
   let curV = pose[j1Key];
-  const maxSteps = Math.round(MAX_RAISE_J1_BOOST / probeStep);
   for (let i = 0; i < maxSteps; i++) {
-    const nextV = clamp(curV + dir * probeStep, j1Lo, j1Hi);
-    if (nextV === curV) break;   // 관절 한계 도달
+    // 목표를 이미 지나쳤으면(overshoot) 멈춘다 — dir 방향으로 target까지만.
+    if (dir > 0 ? curV >= j1Target : curV <= j1Target) break;
+    const nextV = dir > 0 ? Math.min(curV + probeStep, j1Target) : Math.max(curV - probeStep, j1Target);
+    if (nextV === curV) break;
     const testTip = _pureFKStick({ ...pose, [j1Key]: nextV }, s).tip;
     if (!_maxRaiseClearanceOk(testTip, drum.id)) break;   // 다른 드럼에 근접 — 여기서 멈춤
     curV = nextV;
   }
   pose[j1Key] = curV;
 
-  // J4 — 팔꿈치를 펴는(값을 줄이는) 방향으로 같은 방식 검증 후 적용
-  const j4Target  = clamp(pose[j4Key] - MAX_RAISE_J4_DROP, j4Lo, j4Hi);
-  const j4TestTip = _pureFKStick({ ...pose, [j4Key]: j4Target }, s).tip;
-  if (_maxRaiseClearanceOk(j4TestTip, drum.id)) pose[j4Key] = j4Target;
+  // J4 — 팔꿈치를 펴는(값을 줄이는) 방향으로, 이 드럼의 strike 값 대비
+  // MAX_RAISE_J4_DROP만큼 상대적으로 줄어든 지점까지 같은 방식으로
+  // 다가간다(참고 자세의 J4도 절대값 자체는 그리 극단적이지 않았다 —
+  // 상대적 감소폭으로 접근하는 게 더 맞다).
+  const j4Target = clamp(pose[j4Key] - MAX_RAISE_J4_DROP, j4Lo, j4Hi);
+  let curJ4 = pose[j4Key];
+  for (let i = 0; i < maxSteps; i++) {
+    if (curJ4 <= j4Target) break;
+    const nextV = Math.max(curJ4 - probeStep, j4Target);
+    if (nextV === curJ4) break;
+    const testTip = _pureFKStick({ ...pose, [j1Key]: curV, [j4Key]: nextV }, s).tip;
+    if (!_maxRaiseClearanceOk(testTip, drum.id)) break;
+    curJ4 = nextV;
+  }
+  pose[j4Key] = curJ4;
 }
 
 function computeStrikePose(drum, phase, vel = 'medium') {
@@ -2352,14 +2426,22 @@ function buildKeyframes() {
       // 끊긴 것 — 이 타격은 (퍼포먼스가 끝난 뒤) 새로 raise부터 시작해야
       // 한다(hasPrev=false 취급).
       const prevEvt  = armEvts[arm][idx - 1];
+      // "최강"(vel==='max')은 raise 자세 자체가 드럼마다 다르게(그 드럼에서
+      // 가능한 만큼 극단적으로) 계산되므로, 진입 시간도 그 결과에서
+      // 역산한다(_maxTimingFor) — 고정 상수가 아니다.
+      const maxRaisePose  = vel === 'max' ? computeStrikePose(drum, 'raise', vel)  : null;
+      const maxStrikePose = vel === 'max' ? computeStrikePose(drum, 'strike', vel) : null;
+      const maxSwingDur   = vel === 'max' ? _maxTimingFor(maxRaisePose, maxStrikePose, sideKeys) : 0;
       // "최강"(vel==='max') 타격은 퍼포먼스 직후 타격과 똑같이 취급한다
-      // — 관절 한계상 훨씬 큰 진입 동작(MAX_HOLD_DUR+MAX_SWING_DUR)이
-      // 필요해서, 이전 타격과 관절각을 평균하는 경유점(via-point) 체인
-      // 로직 대신 항상 "새로 raise부터 시작"하는 이 분기(hasPrev=false)를
-      // 타게 한다. 배치 시점에 MAX_GUARD_TIME만큼 앞에 다른 타격이 없도록
-      // 강제되므로(addEvent 등) 이 가정이 안전하다.
+      // — 관절 한계상 훨씬 큰 진입 동작이 필요해서, 이전 타격과 관절각을
+      // 평균하는 경유점(via-point) 체인 로직 대신 항상 "새로 raise부터
+      // 시작"하는 이 분기(hasPrev=false)를 타게 한다. 배치 시점에
+      // _maxHitRequiredGap만큼 앞에 다른 타격이 없도록 강제되므로(addEvent
+      // 등) 이 가정이 안전하다.
       const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t) && vel !== 'max';
-      let raiseT     = parseFloat(Math.max(0.001, t - (vel === 'max' ? MAX_SWING_DUR : preDur)).toFixed(3));
+      // raise 도달 후 MAX_HOLD_PAUSE만큼 그 자세로 버티다가 내려친다 —
+      // "기존 raise→strike 보간과는 다른, 크게 들었다 멈췄다 내려치는" 느낌.
+      let raiseT     = parseFloat(Math.max(0.001, t - (vel === 'max' ? (maxSwingDur + MAX_HOLD_PAUSE) : preDur)).toFixed(3));
       const reboundT = parseFloat((t + typeInfo.rebDur).toFixed(3));
 
       const rawNext = armEvts[arm][idx + 1];
@@ -2370,11 +2452,11 @@ function buildKeyframes() {
       const next = (rawNext && !_perfBetween(t, rawNext.t) && rawNext.vel !== 'max') ? rawNext : null;
       // next를 null로 취급해도(위) "이 팔의 마지막 타격"으로 오인해 아래
       // else 분기(대기 홀드)가 곡 끝까지 채워지면 안 된다 — 실제로는 뒤에
-      // "최강" 타격이 있으니 그 타격의 진입 시작 시각(holdT 근사) 전까지만
-      // 채워야 한다(실측 확인: 이 캡이 없으면 최강 타격의 접근 구간에
-      // 대기용 keyframe이 겹쳐 튀는 현상이 있었다).
+      // "최강" 타격이 있으니 그 타격의 진입 시작 시각 전까지만 채워야
+      // 한다(실측 확인: 이 캡이 없으면 최강 타격의 접근 구간에 대기용
+      // keyframe이 겹쳐 튀는 현상이 있었다).
       const nextMaxHoldStart = (rawNext && rawNext.vel === 'max')
-        ? rawNext.t - MAX_SWING_DUR - MAX_HOLD_DUR
+        ? rawNext.t - _maxHitRequiredGap(rawNext.drum.id, arm)
         : Infinity;
 
       // 다음 타격이 있으면 rebound 생략 — rebound가 현재 드럼 바로 위로 팔을 들어
@@ -2396,18 +2478,19 @@ function buildKeyframes() {
           .reduce((max, sp) => Math.max(max, sp.end), 0);
         if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
         const holdStart = precedingPerfEnd;
-        const holdT = parseFloat(Math.max(holdStart, raiseT - (vel === 'max' ? MAX_HOLD_DUR : APPROACH_DUR)).toFixed(3));
+        const holdDur = vel === 'max' ? _maxTimingFor(preLift[arm], maxRaisePose, sideKeys) : APPROACH_DUR;
+        const holdT = parseFloat(Math.max(holdStart, raiseT - holdDur).toFixed(3));
         if (holdT > holdStart + 0.001) {
           addBreathingHold(poseMap, preLift[arm], holdStart, holdT, sideKeys);
           addPose(poseMap, holdT, preLift[arm], sideKeys);
         }
-        const raisePoseForApproach = computeStrikePose(drum, 'raise', vel);
+        const raisePoseForApproach = vel === 'max' ? maxRaisePose : computeStrikePose(drum, 'raise', vel);
         addPose(poseMap, raiseT, raisePoseForApproach, sideKeys);
         // "최강"은 대기 자세(preLift)→boosted raise 구간도 각도 변화폭이
         // 커서, holdT 쪽 접선이 preLift에 끌려 raiseT 부근에서 다시 몰아치는
         // 현상이 있었다(위 raise→strike와 같은 원리) — 여기도 균등 분할.
         if (vel === 'max' && holdT > holdStart + 0.001) {
-          const STEPS_A = 5;
+          const STEPS_A = 8;
           for (let i = 1; i < STEPS_A; i++) {
             const frac = i / STEPS_A;
             const stepT = parseFloat((holdT + (raiseT - holdT) * frac).toFixed(3));
@@ -2419,25 +2502,27 @@ function buildKeyframes() {
             addPose(poseMap, stepT, stepPose, sideKeys);
           }
         }
-        // "최강"은 raise(boosted)→strike 구간이 관절 각도상 다른 타격보다
-        // 훨씬 크다(J1·J4까지 포함) — Catmull-Rom은 등속이 아니라서 이
-        // 구간 시간(MAX_SWING_DUR)을 다 줘도 실측해보니 두 점만으로는
-        // 앞부분에서 훨씬 빠르게 몰아치고 뒷부분은 밋밋해지는 현상이
-        // 있었다(양 끝 홀드/타격 자세에 접선이 끌려 휘어짐 — 경유점 하나만
-        // 추가해서도 그 경유점 자리에서 다시 튀는 걸로 확인됨). 이 구간을
-        // 관절각 기준으로 균등 분할한 여러 점으로 채워 사실상 선형에
-        // 가깝게 만들면 스플라인이 어느 한 곳에 쏠릴 여지가 없다.
         if (vel === 'max') {
-          const strikePoseForRaise = computeStrikePose(drum, 'strike', vel);
-          const raisePose = computeStrikePose(drum, 'raise', vel);
-          const STEPS = 5;
+          // raise(극단적 자세) 도달 후 MAX_HOLD_PAUSE만큼 그 자세 그대로
+          // 버틴다 — 이게 "기존 raise→strike 보간과는 다른 느낌"의 핵심
+          // (성능 클립 파워 레이즈처럼 크게 들고 정지했다가 내려침).
+          const pauseEndT = parseFloat((raiseT + MAX_HOLD_PAUSE).toFixed(3));
+          if (pauseEndT < t) addPose(poseMap, pauseEndT, maxRaisePose, sideKeys);
+          // raise(boosted)→strike 구간이 관절 각도상 다른 타격보다 훨씬
+          // 크다(J1·J4까지 포함) — Catmull-Rom은 등속이 아니라서 이 구간
+          // 시간(maxSwingDur)을 다 줘도 실측해보니 두 점만으로는 앞부분에서
+          // 훨씬 빠르게 몰아치고 뒷부분은 밋밋해지는 현상이 있었다(양 끝
+          // 홀드/타격 자세에 접선이 끌려 휘어짐). 이 구간을 관절각 기준
+          // 균등 분할한 여러 점으로 채워 사실상 선형에 가깝게 만든다.
+          const swingStart = Math.min(pauseEndT, t - 0.001);
+          const STEPS = 8;
           for (let i = 1; i < STEPS; i++) {
             const frac = i / STEPS;
-            const stepT = parseFloat((raiseT + (t - raiseT) * frac).toFixed(3));
-            if (stepT <= raiseT || stepT >= t) continue;
+            const stepT = parseFloat((swingStart + (t - swingStart) * frac).toFixed(3));
+            if (stepT <= swingStart || stepT >= t) continue;
             const stepPose = {};
             sideKeys.forEach(k => {
-              stepPose[k] = raisePose[k] + (strikePoseForRaise[k] - raisePose[k]) * frac;
+              stepPose[k] = maxRaisePose[k] + (maxStrikePose[k] - maxRaisePose[k]) * frac;
             });
             addPose(poseMap, stepT, stepPose, sideKeys);
           }
@@ -5003,7 +5088,7 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
       // "최강" 타격(또는 그 근처로 옮기려는 타격)은 가드 구간을 침해하면
       // 이동을 막는다 — addEvent와 동일한 제약(_maxHitGuardBlocked).
       const dragExcludeKey = `${drum.id}_${evt.beat}_${effArm}`;
-      if (_maxHitGuardBlocked(effArm, newBeat, evt.vel ?? 'medium', dragExcludeKey)) return;
+      if (_maxHitGuardBlocked(effArm, newBeat, evt.vel ?? 'medium', dragExcludeKey, drum.id)) return;
       if (newBeat !== evt.beat) {
         evt.beat = newBeat;
         hit.style.left   = ((evt.beat - 1) * PX_PER_BEAT) + 'px';
@@ -5508,17 +5593,12 @@ function _isBeatInPerf(beat) {
   return _perfOccupiedBeatRanges().some(r => beat >= r.start && beat < r.end);
 }
 
-/** "최강"(vel==='max') 타격은 진입에 훨씬 큰 시간(MAX_GUARD_TIME)이
- *  필요해, 같은 팔의 다른 타격이 그만큼 가까이 있으면 배치/변경을 막는다.
- *  new(배치하려는 것)와 기존 이벤트 중 어느 한쪽이라도 vel==='max'면
- *  검사한다(양방향 보호) — excludeKey는 자기 자신 제외용
- *  `${drumId}_${beat}_${arm}`. */
-function _maxHitGuardBlocked(arm, beat, vel, excludeKey) {
-  // 실측(1.3배 여유를 준 MAX_HOLD_DUR·MAX_SWING_DUR로도 정확히 경계값에
-  // 걸치면 이전 타격의 rebound 키프레임과 내 hold 키프레임이 거의 같은
-  // 시각에 겹쳐 순간적으로 튀는 현상이 실측 확인됐다 — 배치 차단 기준은
-  // 실제 필요 시간(MAX_GUARD_TIME)보다 20% 더 넉넉하게 잡는다.
-  const guardBeats = (MAX_GUARD_TIME * 1.2) / (60 / bpm);
+/** "최강"(vel==='max') 타격은 진입에 훨씬 큰 시간이 필요해(드럼마다
+ *  다름 — _maxHitRequiredGap), 같은 팔의 다른 타격이 그만큼 가까이 있으면
+ *  배치/변경을 막는다. new(배치하려는 것)와 기존 이벤트 중 어느 한쪽이라도
+ *  vel==='max'면 검사한다(양방향 보호) — drumId는 배치하려는 드럼(필요
+ *  시간 계산용), excludeKey는 자기 자신 제외용 `${drumId}_${beat}_${arm}`. */
+function _maxHitGuardBlocked(arm, beat, vel, excludeKey, drumId) {
   return timelineEvents.some(e => {
     if (e.type === 'perf') return false;
     const d = drumKit.find(dd => dd.id === e.drumId);
@@ -5526,7 +5606,16 @@ function _maxHitGuardBlocked(arm, beat, vel, excludeKey) {
     const eArm = e.arm ?? d.arm;
     if (eArm !== arm) return false;
     if (`${e.drumId}_${e.beat}_${eArm}` === excludeKey) return false;
-    if (vel !== 'max' && e.vel !== 'max') return false;
+    const otherIsMax = e.vel === 'max';
+    if (vel !== 'max' && !otherIsMax) return false;
+    // 실측(경계값에 정확히 걸치면 앞뒤 keyframe이 겹쳐 순간적으로 튀는
+    // 현상 확인됨) — 필요 시간보다 20% 더 넉넉하게 잡는다. 둘 다 최강이면
+    // 더 큰 쪽 기준.
+    const needed = Math.max(
+      vel === 'max' && drumId ? _maxHitRequiredGap(drumId, arm) : 0,
+      otherIsMax ? _maxHitRequiredGap(e.drumId, eArm) : 0
+    ) * 1.2;
+    const guardBeats = needed / (60 / bpm);
     return Math.abs(e.beat - beat) < guardBeats;
   });
 }
@@ -5596,12 +5685,13 @@ function addEvent(drumId, beat, arm) {
     return;
   }
 
-  // ── 규칙 3: "최강" 타격은 진입에 큰 시간이 필요 — 같은 팔의 다른
-  // 타격이 MAX_GUARD_TIME보다 가까우면(이 타격이 최강이거나, 근처에
-  // 이미 최강 타격이 있으면) 배치 불가.
-  if (_maxHitGuardBlocked(useArm, beat, defaultVel, null)) {
+  // ── 규칙 3: "최강" 타격은 진입에 큰 시간이 필요(드럼마다 다름) — 같은
+  // 팔의 다른 타격이 그만큼 가까우면(이 타격이 최강이거나, 근처에 이미
+  // 최강 타격이 있으면) 배치 불가.
+  if (_maxHitGuardBlocked(useArm, beat, defaultVel, null, drumId)) {
     const armKr = useArm === 'L' ? '왼팔' : '오른팔';
-    setStatus(`❌ beat ${beat.toFixed(2)}: "최강" 타격은 ${armKr}의 다른 타격과 최소 ${MAX_GUARD_TIME.toFixed(1)}초 이상 떨어져 있어야 합니다`);
+    const need = _maxHitRequiredGap(drumId, useArm) * 1.2;
+    setStatus(`❌ beat ${beat.toFixed(2)}: "최강" 타격은 ${armKr}의 다른 타격과 최소 ${need.toFixed(1)}초 이상 떨어져 있어야 합니다`);
     return;
   }
 
@@ -5824,9 +5914,10 @@ function applyVel(drumId, beat, arm) {
   const effArm = arm ?? (d ? _effArm(evt) : null);
   if (d && d.type !== 'kick' && defaultVel === 'max') {
     const excludeKey = `${drumId}_${beat}_${effArm}`;
-    if (_maxHitGuardBlocked(effArm, beat, 'max', excludeKey)) {
+    if (_maxHitGuardBlocked(effArm, beat, 'max', excludeKey, drumId)) {
       const armKr = effArm === 'L' ? '왼팔' : '오른팔';
-      setStatus(`❌ beat ${beat.toFixed(2)}: "최강"으로 바꾸려면 ${armKr}의 다른 타격과 최소 ${MAX_GUARD_TIME.toFixed(1)}초 이상 떨어져 있어야 합니다`);
+      const need = _maxHitRequiredGap(drumId, effArm) * 1.2;
+      setStatus(`❌ beat ${beat.toFixed(2)}: "최강"으로 바꾸려면 ${armKr}의 다른 타격과 최소 ${need.toFixed(1)}초 이상 떨어져 있어야 합니다`);
       return;
     }
   }
