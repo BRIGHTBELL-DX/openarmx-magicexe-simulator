@@ -683,6 +683,9 @@ body {
 }
 .tl-perf-menu-item:hover { background: rgba(160,90,220,0.25); }
 .tl-perf-menu-bars { font-size: 10px; color: #8888aa; flex-shrink: 0; }
+/* 파워 레이즈 타격 드럼 선택 시 그 팔로 도달 불가한 드럼 표시 */
+.tl-perf-menu-item-unreach { opacity: 0.5; }
+.tl-perf-menu-item-unreach .tl-perf-menu-bars { color: #cc5544; }
 .tl-perf-menu-cancel { color: #999; justify-content: center; margin-top: 2px; border-top: 1px solid #2a2a44; }
 /* 마디 수 필터 — 클립 목록 위에 고정, 클릭해도 패널 전환 없이 목록만 갱신 */
 .tl-perf-menu-filter {

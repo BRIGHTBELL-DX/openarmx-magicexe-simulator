@@ -4992,6 +4992,109 @@ function _showPerfClipMenu(x, y, onPick) {
   render();
 }
 
+/** 파워 레이즈 계열 클립이면 어느 팔(들)이 올라가는지, 아니면 null.
+ *  이 계열은 클립 자체가 "들어올려 대기"까지만 하고 타격은 없다 — 그래서
+ *  클립 종료 직후 박자에 실제 타격을 따로 놓아야 하나의 동작이 되는데,
+ *  사용자가 박자를 직접 맞춰야 해서 어긋나기 쉬웠다(사용자 지적: "바로
+ *  뒤에 드럼키트를 타임라인에 넣으니까 적합하지 않다"). 클립을 고를 때
+ *  타격 드럼까지 같이 골라 한 번에 배치한다. */
+function _powerRaiseArms(presetId) {
+  if (presetId === 'power_raise_l')    return ['L'];
+  if (presetId === 'power_raise_r')    return ['R'];
+  if (presetId === 'power_raise_both') return ['L', 'R'];
+  return null;
+}
+
+/** 파워 레이즈 직후 타격할 드럼 선택 메뉴 — 그 팔로 실제 도달 가능한지
+ *  (_armReachOk) 표시해준다. onPick(drumId | null) — null이면 타격 없이 진행. */
+function _showStrikeDrumMenu(x, y, arm, onPick) {
+  document.querySelectorAll('.tl-perf-menu').forEach(m => m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'tl-perf-menu';
+  document.body.appendChild(menu);
+
+  const armKr = arm === 'L' ? '왼팔' : '오른팔';
+  const items = drumKit.filter(d => d.type !== 'kick').map(d => {
+    const ok = _armReachOk(d, arm);
+    return `<div class="tl-perf-menu-item${ok ? '' : ' tl-perf-menu-item-unreach'}" data-drum="${d.id}"
+                 title="${ok ? '' : `${armKr}로는 도달 불가 — 드럼 위치를 옮기거나 다른 드럼을 고르세요`}">
+              <span>${d.name}</span><span class="tl-perf-menu-bars">${ok ? '' : '도달 불가'}</span>
+            </div>`;
+  }).join('');
+  menu.innerHTML =
+      `<div class="tl-perf-menu-filter"><div class="tl-perf-menu-filter-item active">${armKr} 타격 드럼</div></div>`
+    + items
+    + `<div class="tl-perf-menu-item tl-perf-menu-cancel">✕ 타격 없이 진행</div>`;
+
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+  const r = menu.getBoundingClientRect();
+  if (r.right  > innerWidth)  menu.style.left = Math.max(4, innerWidth  - r.width  - 8) + 'px';
+  if (r.bottom > innerHeight) menu.style.top  = Math.max(4, innerHeight - r.height - 8) + 'px';
+
+  let done = false;
+  function cleanup() {
+    menu.remove();
+    document.removeEventListener('mousedown', onDocClick, true);
+  }
+  function onDocClick(e) {
+    // 메뉴 밖 클릭 = 취소(타격 없이 진행) — 콜백은 반드시 한 번은 부른다.
+    if (!menu.contains(e.target) && !done) { done = true; cleanup(); onPick(null); }
+  }
+  menu.addEventListener('mousedown', e => e.stopPropagation());
+  menu.addEventListener('click', e => {
+    const item = e.target.closest('.tl-perf-menu-item');
+    if (!item || done) return;
+    done = true;
+    cleanup();
+    onPick(item.classList.contains('tl-perf-menu-cancel') ? null : (item.dataset.drum || null));
+  });
+  setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
+}
+
+/** 퍼포먼스 클립을 타임라인에 배치 — 파워 레이즈 계열이면 팔별로 타격
+ *  드럼을 이어서 물어보고, 클립 종료 박자에 그 타격까지 함께 찍는다. */
+function _placePerfClip(x, y, beat, presetId, pickedBars) {
+  const arms = _powerRaiseArms(presetId);
+  if (!arms) {
+    timelineEvents.push({ type: 'perf', presetId, beat, bars: pickedBars });
+    _commitTimeline();
+    return;
+  }
+  const picks = [];
+  const finish = () => {
+    timelineEvents.push({ type: 'perf', presetId, beat, bars: pickedBars });
+    // 클립이 끝나는 바로 그 박자 = 타격 시점. buildKeyframes가 "퍼포먼스
+    // 직후 첫 타격"으로 처리해 클립 끝 자세(최고점)를 그 타격의 raise로
+    // 그대로 이어받는다 — 최고점→타격이 하나의 스윙이 된다.
+    const endBeat = parseFloat((beat + pickedBars * beatsPerBar).toFixed(4));
+    const skipped = [];
+    picks.forEach(p => {
+      // 같은 박자·같은 팔이 이미 차 있으면 배치 불가(addEvent 규칙 1과 동일)
+      const conflict = timelineEvents.some(ev => {
+        if (ev.type === 'perf' || Math.abs(ev.beat - endBeat) >= 0.01) return false;
+        const ed = drumKit.find(d => d.id === ev.drumId);
+        return ed && ed.type !== 'kick' && _effArm(ev) === p.arm;
+      });
+      if (conflict) { skipped.push(p.arm === 'L' ? '왼팔' : '오른팔'); return; }
+      timelineEvents.push({ drumId: p.drumId, beat: endBeat, vel: 'hard', arm: p.arm });
+    });
+    _commitTimeline();
+    const placed = picks.length - skipped.length;
+    setStatus(skipped.length
+      ? `파워 레이즈 배치 — 타격 ${placed}개 추가(${skipped.join('·')}은 그 박자에 이미 타격이 있어 건너뜀)`
+      : `파워 레이즈 배치 — beat ${endBeat.toFixed(2)}에 타격 ${placed}개 함께 추가`);
+  };
+  const askNext = (i) => {
+    if (i >= arms.length) { finish(); return; }
+    _showStrikeDrumMenu(x, y, arms[i], (drumId) => {
+      if (drumId) picks.push({ arm: arms[i], drumId });
+      askNext(i + 1);
+    });
+  };
+  askNext(0);
+}
+
 /** 퍼포먼스 레인 — 팔 구분 없이 한 줄, 클릭으로 새 구간 생성 또는
  *  기존 블록 클릭으로 클립 재선택·삭제. */
 function _buildPerfLane(totalW, div, totalBeats) {
@@ -5085,9 +5188,7 @@ function _buildPerfLane(totalW, div, totalBeats) {
     if (e.target.closest('.tl-perf-block')) return;
     const beat = beatFromEvent(e);
     _showPerfClipMenu(e.clientX, e.clientY, (presetId, pickedBars) => {
-      timelineEvents.push({ type: 'perf', presetId, beat, bars: pickedBars });
-      renderTimeline();
-      saveTimeline();
+      _placePerfClip(e.clientX, e.clientY, beat, presetId, pickedBars);
     });
   });
 
