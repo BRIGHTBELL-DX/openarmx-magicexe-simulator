@@ -2218,6 +2218,10 @@ function buildKeyframes() {
   const _tInsidePerf = t => perfSpans.some(sp => t >= sp.start && t < sp.end);
   const _perfBetween = (tA, tB) => perfSpans.some(sp => sp.start >= tA && sp.start < tB);
 
+  /** 퍼포먼스 span → { L?: 잘라낼 시각, R?: ... } — 그 시각 이후의 클립
+   *  키프레임은 주입하지 않는다(타격을 향해 내려오는 구간이 덮이지 않게). */
+  const perfTailCut = new Map();
+
   // 팔별 이벤트를 시간순 정렬 — rebound/raise 겹침 감지에 필요
   // evt.arm이 있으면(팔 오버라이드) 드럼의 원래 팔 대신 그 팔로 그룹핑한다.
   const armEvts = { L: [], R: [] };
@@ -2293,17 +2297,64 @@ function buildKeyframes() {
         // (사용자 지적: "퍼포먼스 이후 타격이 될 수 있는데 갑자기 튀는
         // 현상 없이 이어져야"). 직전 퍼포먼스 종료 시각으로 raiseT를
         // 클램프하고, 그 경우 진짜 유휴 시간이 있을 때만 대기 홀드를 채운다.
-        const precedingPerfEnd = perfSpans
+        const precedingPerfSpan = perfSpans
           .filter(sp => sp.end <= t)
-          .reduce((max, sp) => Math.max(max, sp.end), 0);
-        if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
-        const holdStart = precedingPerfEnd;
-        const holdT = parseFloat(Math.max(holdStart, raiseT - APPROACH_DUR).toFixed(3));
-        if (holdT > holdStart + 0.001) {
-          addBreathingHold(poseMap, preLift[arm], holdStart, holdT, sideKeys);
-          addPose(poseMap, holdT, preLift[arm], sideKeys);
+          .reduce((best, sp) => (!best || sp.end > best.end) ? sp : best, null);
+        const precedingPerfEnd = precedingPerfSpan ? precedingPerfSpan.end : 0;
+
+        // ── 퍼포먼스 클립이 끝나는 바로 그 박자의 타격(파워 레이즈 연계) ──
+        // 이 경우 raiseT·t·클립 마지막 키프레임이 전부 같은 시각이라, 나중에
+        // 주입되는 퍼포먼스 포즈가 타격 포즈를 덮어써 "팔이 최고점에 멈춘 채
+        // 타격이 사라지는" 버그가 있었다(사용자 지적: "놓아지기만 하고 실제
+        // 타격은 발생하지 않는다"). 클립의 마지막 자세(최고점)를 그대로 이어
+        // 받아 타격 자세까지 내려오는 구간을 여기서 직접 만든다 — 내려오는
+        // 데 걸리는 시간은 관절 속도 한계에서 역산하고(드럼마다 최고점↔타격
+        // 각도 차가 달라 고정 상수로는 안 됨), 그 구간만큼 클립 꼬리(평평한
+        // 최고점 대기)를 잘라내 겹치지 않게 한다(perfTailCut).
+        // 퍼포먼스가 끝난 뒤 "그 팔이 아직 최고점 자세로 남아 있는" 동안의
+        // 첫 타격이면 연계 처리한다(파워 레이즈 → 타격). 간격이 너무 벌어지면
+        // (4박 초과) 그냥 대기 자세로 돌아갔다 다시 드는 게 자연스러워 제외.
+        const perfGap = precedingPerfSpan ? (t - precedingPerfSpan.end) : Infinity;
+        const isPerfHandoff = precedingPerfSpan && perfGap >= -0.002 && perfGap <= beatDur * 4;
+        if (isPerfHandoff) {
+          const sp = precedingPerfSpan;
+          const peakPose   = _perfClipFinalPose(sp.evt.presetId, sp.bars, arm);
+          const strikePose = computeStrikePose(drum, 'strike', vel);
+          const descentDur = _perfDescentDur(peakPose, strikePose, arm);
+          // 내려오기 시작할 수 있는 가장 이른 시각 = 클립이 최고점에 도달한
+          // 시점(그 앞은 아직 올라가는 중이라 건드리면 안 됨).
+          const tailAt    = _perfClipTailStartAt(sp.evt.presetId, sp.bars, arm);
+          const tailStart = sp.start + (sp.end - sp.start) * tailAt;
+          const descentStart = parseFloat(Math.max(tailStart, t - descentDur).toFixed(3));
+          // 클립의 평평한 최고점 대기 구간 중 descentStart 이후는 주입하지
+          // 않는다(내려오는 구간을 덮어쓰지 않게).
+          if (descentStart < sp.end - 0.0005) {
+            const cut = perfTailCut.get(sp) || {};
+            cut[arm] = descentStart;
+            perfTailCut.set(sp, cut);
+          }
+          addPose(poseMap, descentStart, peakPose, sideKeys);
+          const STEPS = 8;
+          for (let i = 1; i < STEPS; i++) {
+            const frac  = i / STEPS;
+            const stepT = parseFloat((descentStart + (t - descentStart) * frac).toFixed(3));
+            if (stepT <= descentStart || stepT >= t) continue;
+            const stepPose = {};
+            sideKeys.forEach(k => {
+              stepPose[k] = peakPose[k] + (strikePose[k] - peakPose[k]) * frac;
+            });
+            addPose(poseMap, stepT, stepPose, sideKeys);
+          }
+        } else {
+          if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
+          const holdStart = precedingPerfEnd;
+          const holdT = parseFloat(Math.max(holdStart, raiseT - APPROACH_DUR).toFixed(3));
+          if (holdT > holdStart + 0.001) {
+            addBreathingHold(poseMap, preLift[arm], holdStart, holdT, sideKeys);
+            addPose(poseMap, holdT, preLift[arm], sideKeys);
+          }
+          addPose(poseMap, raiseT, computeStrikePose(drum, 'raise', vel), sideKeys);
         }
-        addPose(poseMap, raiseT, computeStrikePose(drum, 'raise', vel), sideKeys);
       }
       addPose(poseMap, t, computeStrikePose(drum, 'strike', vel), sideKeys, true);
       // rebound 직후 바로 퍼포먼스가 이어지면(간격이 rebDur보다 좁으면)
@@ -2519,15 +2570,20 @@ function buildKeyframes() {
   // 양쪽 poseMap에 그대로 찍는다. 위에서 이미 hasPrev/next 계산 시 이
   // 구간을 피해가도록(perfSpans) 타격 체인을 끊어뒀으므로, 여기서 찍는
   // 포즈와 타격 경유점이 같은 시간대에 겹칠 일은 없다.
-  perfSpans.forEach(({ bars, keys, start }) => {
+  perfSpans.forEach((sp) => {
+    const { bars, keys, start } = sp;
     const duration = bars * beatsPerBar * beatDur;
     if (!Array.isArray(keys) || !keys.length || duration <= 0) return;
+    // 이 클립 끝 박자에 타격이 붙어 있으면(파워 레이즈 연계) 그 팔은
+    // descentStart 이후 키프레임을 찍지 않는다 — 위에서 만든 "최고점→타격"
+    // 하강 구간을 클립의 평평한 최고점 대기가 덮어쓰지 않게 하기 위함.
+    const cut = perfTailCut.get(sp) || {};
     keys.slice().sort((a, b) => a.at - b.at).forEach(k => {
       const time = parseFloat((start + duration * Math.min(1, Math.max(0, k.at))).toFixed(3));
       const lPose = {}; L_KEYS.forEach((key, i) => { lPose[key] = k.pose[i] ?? 0; });
       const rPose = {}; R_KEYS.forEach((key, i) => { rPose[key] = k.pose[7 + i] ?? 0; });
-      addPose(L_poseMap, time, lPose, L_KEYS);
-      addPose(R_poseMap, time, rPose, R_KEYS);
+      if (cut.L === undefined || time <= cut.L + 0.0005) addPose(L_poseMap, time, lPose, L_KEYS);
+      if (cut.R === undefined || time <= cut.R + 0.0005) addPose(R_poseMap, time, rPose, R_KEYS);
     });
   });
 
@@ -4998,6 +5054,50 @@ function _showPerfClipMenu(x, y, onPick) {
  *  사용자가 박자를 직접 맞춰야 해서 어긋나기 쉬웠다(사용자 지적: "바로
  *  뒤에 드럼키트를 타임라인에 넣으니까 적합하지 않다"). 클립을 고를 때
  *  타격 드럼까지 같이 골라 한 번에 배치한다. */
+/** 클립 마지막 자세(해당 팔) — 파워 레이즈라면 곧 "최고점". */
+function _perfClipFinalPose(presetId, wantBars, arm) {
+  const clip = (typeof PERFORMANCE_CLIPS !== 'undefined') ? PERFORMANCE_CLIPS[presetId] : null;
+  if (!clip) return null;
+  const keys = _clipKeysForBars(clip, wantBars).keys.slice().sort((a, b) => a.at - b.at);
+  const last = keys[keys.length - 1];
+  const base = arm === 'L' ? 0 : 7;
+  const out = {};
+  _SIDE_KEYS[arm].forEach((k, i) => { out[k] = last.pose[base + i] ?? 0; });
+  return out;
+}
+
+/** 클립이 "마지막 자세에 도달하는" 정규화 시각(0~1) — 그 뒤는 평평한 대기
+ *  구간이라, 타격을 향해 내려오기 시작해도 되는 가장 이른 지점이다.
+ *  이보다 앞에서 내려오기 시작하면 아직 올라가는 중인 자세를 건너뛰고
+ *  최고점을 순간이동시키게 돼 관절이 튄다(실측 647% 초과 원인). */
+function _perfClipTailStartAt(presetId, wantBars, arm) {
+  const clip = (typeof PERFORMANCE_CLIPS !== 'undefined') ? PERFORMANCE_CLIPS[presetId] : null;
+  if (!clip) return 1;
+  const keys = _clipKeysForBars(clip, wantBars).keys.slice().sort((a, b) => a.at - b.at);
+  const base = arm === 'L' ? 0 : 7;
+  const same = (k1, k2) => _SIDE_KEYS[arm].every((_, i) =>
+    Math.abs((k1.pose[base + i] ?? 0) - (k2.pose[base + i] ?? 0)) < 1e-6);
+  const last = keys[keys.length - 1];
+  let i = keys.length - 1;
+  while (i > 0 && same(keys[i - 1], last)) i--;
+  return keys[i].at;
+}
+
+/** 최고점 자세 → 타격 자세로 내려오는 데 필요한 최소 시간 — 관절별
+ *  (각도차/한계속도) 중 최댓값에 여유를 곱한다. 드럼마다 각도차가 달라
+ *  고정 상수로는 안 되고, Catmull-Rom이 등속이 아니라 구간 앞부분에
+ *  속도가 몰리므로 여유가 필요하다(균등 분할 경유점과 함께 사용). */
+const PERF_DESCENT_MARGIN = 1.9;
+function _perfDescentDur(fromPose, toPose, arm) {
+  let dur = 0.18;
+  _SIDE_KEYS[arm].forEach(k => {
+    const lim  = _JOINT_MAX_VEL[k] ?? 1.5;
+    const need = (Math.abs((toPose[k] ?? 0) - (fromPose[k] ?? 0)) / lim) * PERF_DESCENT_MARGIN;
+    if (need > dur) dur = need;
+  });
+  return dur;
+}
+
 function _powerRaiseArms(presetId) {
   if (presetId === 'power_raise_l')    return ['L'];
   if (presetId === 'power_raise_r')    return ['R'];
@@ -5064,26 +5164,56 @@ function _placePerfClip(x, y, beat, presetId, pickedBars) {
   const picks = [];
   const finish = () => {
     timelineEvents.push({ type: 'perf', presetId, beat, bars: pickedBars });
-    // 클립이 끝나는 바로 그 박자 = 타격 시점. buildKeyframes가 "퍼포먼스
-    // 직후 첫 타격"으로 처리해 클립 끝 자세(최고점)를 그 타격의 raise로
-    // 그대로 이어받는다 — 최고점→타격이 하나의 스윙이 된다.
-    const endBeat = parseFloat((beat + pickedBars * beatsPerBar).toFixed(4));
-    const skipped = [];
+    // 타격 시점 — 최고점에서 타격 자세까지 내려오는 데 필요한 시간을
+    // 확보할 수 있는 가장 이른 박자에 놓는다. 무조건 클립 끝 박자에 붙이면
+    // 내려올 시간이 0이라 관절이 튄다(실측 확인) — 클립의 평평한 최고점
+    // 대기 구간을 하강에 쓰고, 그래도 모자라면 박자를 뒤로 미룬다.
+    const beatDur    = 60 / bpm;
+    const clipEndBeat = beat + pickedBars * beatsPerBar;
+    let endBeat = clipEndBeat;
     picks.forEach(p => {
+      const d = drumKit.find(dd => dd.id === p.drumId);
+      if (!d) return;
+      const peak = _perfClipFinalPose(presetId, pickedBars, p.arm);
+      if (!peak) return;
+      const strikePose = computeStrikePose(p.arm === d.arm ? d : { ...d, arm: p.arm }, 'strike', 'hard');
+      const need    = _perfDescentDur(peak, strikePose, p.arm);
+      const tailAt  = _perfClipTailStartAt(presetId, pickedBars, p.arm);
+      // 클립 안에서 하강에 쓸 수 있는 시간(최고점 도달 ~ 클립 끝)
+      const inClip  = pickedBars * beatsPerBar * beatDur * (1 - tailAt);
+      const extra   = Math.max(0, need - inClip);
+      endBeat = Math.max(endBeat, clipEndBeat + Math.ceil(extra / beatDur - 1e-6));
+    });
+    endBeat = parseFloat(endBeat.toFixed(4));
+    const skipped = [], blocked = [];
+    picks.forEach(p => {
+      const armKr = p.arm === 'L' ? '왼팔' : '오른팔';
       // 같은 박자·같은 팔이 이미 차 있으면 배치 불가(addEvent 규칙 1과 동일)
       const conflict = timelineEvents.some(ev => {
         if (ev.type === 'perf' || Math.abs(ev.beat - endBeat) >= 0.01) return false;
         const ed = drumKit.find(d => d.id === ev.drumId);
         return ed && ed.type !== 'kick' && _effArm(ev) === p.arm;
       });
-      if (conflict) { skipped.push(p.arm === 'L' ? '왼팔' : '오른팔'); return; }
+      if (conflict) { skipped.push(armKr); return; }
+      // 클립 끝과 이 타격 사이에 같은 팔의 다른 타격이 끼어 있으면 "퍼포먼스
+      // 직후 첫 타격" 연계가 그쪽으로 가버려 최고점→타격 스윙이 성립하지
+      // 않는다 — 그런 자리에는 아예 붙이지 않고 알려준다.
+      const between = timelineEvents.some(ev => {
+        if (ev.type === 'perf' || ev.beat <= clipEndBeat || ev.beat >= endBeat) return false;
+        const ed = drumKit.find(d => d.id === ev.drumId);
+        return ed && ed.type !== 'kick' && _effArm(ev) === p.arm;
+      });
+      if (between) { blocked.push(armKr); return; }
       timelineEvents.push({ drumId: p.drumId, beat: endBeat, vel: 'hard', arm: p.arm });
     });
     _commitTimeline();
-    const placed = picks.length - skipped.length;
-    setStatus(skipped.length
-      ? `파워 레이즈 배치 — 타격 ${placed}개 추가(${skipped.join('·')}은 그 박자에 이미 타격이 있어 건너뜀)`
-      : `파워 레이즈 배치 — beat ${endBeat.toFixed(2)}에 타격 ${placed}개 함께 추가`);
+    const placed = picks.length - skipped.length - blocked.length;
+    const notes = [];
+    if (skipped.length) notes.push(`${skipped.join('·')}은 그 박자에 이미 타격이 있음`);
+    if (blocked.length) notes.push(`${blocked.join('·')}은 클립 끝~타격 사이에 다른 타격이 있어 연계 불가(그 구간을 비우고 다시 시도)`);
+    setStatus(notes.length
+      ? `파워 레이즈 배치 — 타격 ${placed}개 추가 · ${notes.join(' / ')}`
+      : `파워 레이즈 배치 — beat ${endBeat.toFixed(2)}에 타격 ${placed}개 함께 추가(최고점에서 이어서 내려침)`);
   };
   const askNext = (i) => {
     if (i >= arms.length) { finish(); return; }
