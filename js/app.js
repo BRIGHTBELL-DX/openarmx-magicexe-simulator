@@ -2352,7 +2352,8 @@ function buildKeyframes() {
           const peakPose   = _perfClipFinalPose(sp.evt.presetId, sp.bars, arm);
           const raisePose  = computeStrikePose(drum, 'raise',  vel);
           const strikePose = computeStrikePose(drum, 'strike', vel);
-          const { glide, snap } = _perfHandoffDur(peakPose, raisePose, strikePose, arm);
+          const { glide, snap } = _perfHandoffDur(peakPose, raisePose, strikePose, arm,
+                                                  _clipVelBudget(sp.evt.presetId));
           // 내려오기 시작할 수 있는 가장 이른 시각 = 클립이 최고점에 도달한
           // 시점(그 앞은 아직 올라가는 중이라 건드리면 안 됨).
           const tailAt    = _perfClipTailStartAt(sp.evt.presetId, sp.bars, arm);
@@ -5125,14 +5126,34 @@ function _perfClipTailStartAt(presetId, wantBars, arm) {
  *  깔아 속도를 눌렀는데, 그러면 등속이라 "뚝뚝 끊어서 움직이는" 느낌이
  *  났다(사용자 지적) — 이제 경유점을 smoothstep 위치에 놓아 가감속이
  *  살아 있게 한다. */
-function _easedDur(fromPose, toPose, arm, margin) {
+function _easedDur(fromPose, toPose, arm, margin, budget) {
   let dur = 0.12;
   _SIDE_KEYS[arm].forEach(k => {
-    const lim  = _JOINT_MAX_VEL[k] ?? 1.5;
+    const lim  = (budget && budget[k]) ?? _JOINT_MAX_VEL[k] ?? 1.5;
     const need = (Math.abs((toPose[k] ?? 0) - (fromPose[k] ?? 0)) / lim) * margin;
     if (need > dur) dur = need;
   });
   return dur;
+}
+
+// ── 파워 레이즈 전용 J1 속도 예산 ────────────────────────────────
+// 시뮬레이터 기본 한계 _JOINT_MAX_VEL(J1=1.5)은 실제 모터 정격보다 훨씬
+// 보수적인 placeholder다 — OpenArmX의 J1/J2는 RobStride 04이고, 제조사
+// 페이지 실측 기준 무부하 200rpm(20.94rad/s) / 정격부하 50rpm(5.24rad/s),
+// 정격토크 40N·m·피크 120N·m다. 1마디(1.752초) 안에서 풀 진폭 상승+하강+
+// 손목스냅을 끝내려면 J1에 약 3.4rad/s(=32.5rpm)가 필요한데, 이는 정격부하
+// 속도의 65%·무부하의 16% 수준이다. "정격부하 속도"는 정격토크를 계속 낼
+// 때의 속도지 상한이 아니고, 드럼 스틱 팔은 관성 위주라 정격토크에 한참
+// 못 미치므로 이 구간은 여유가 있다(토크-속도 곡선상 32.5rpm에서 45N·m급
+// 사용 가능). 참고로 이 앱의 일반 타격은 이미 손목(J7)을 스냅 구간에
+// 6~10rad/s로 돌리고 있고 실물에서 문제없이 동작한다(실측).
+// 영향 범위를 파워 레이즈 계열로 한정하기 위해 전역 한계는 건드리지 않고
+// 이 예산만 따로 둔다 — 실물 검증 후 조정할 것.
+const PERF_RAISE_J1_BUDGET = 3.4;
+/** 클립이 자체 속도 예산(clip.velBudget)을 선언했으면 그 값, 없으면 null. */
+function _clipVelBudget(presetId) {
+  const clip = (typeof PERFORMANCE_CLIPS !== 'undefined') ? PERFORMANCE_CLIPS[presetId] : null;
+  return clip?.velBudget || null;
 }
 const _smoothstep = x => x * x * (3 - 2 * x);
 
@@ -5141,8 +5162,8 @@ const _smoothstep = x => x * x * (3 - 2 * x);
  *  snap : raise → strike (손목이 내리꽂히는 구간) — 이 마지막 스냅이 있어야
  *         "천천히 내려오는" 게 아니라 실제 타격처럼 보인다(사용자 지적).
  *  일반 타격의 raise→strike와 같은 구조라 타격감이 기존 비트와 일치한다. */
-function _perfHandoffDur(peakPose, raisePose, strikePose, arm) {
-  const glide = _easedDur(peakPose, raisePose, arm, 1.5);
+function _perfHandoffDur(peakPose, raisePose, strikePose, arm, budget) {
+  const glide = _easedDur(peakPose, raisePose, arm, 1.5, budget);
   // 스냅 구간은 일반 타격의 raise→strike와 "같은 시간"(preDur)을 쓴다 —
   // 관절 속도 한계에서 역산하면 0.5초 가까이 나와 오히려 일반 비트보다
   // 느려져서 타격처럼 안 보였다(실측). 손목(J7) 한 축만 도는 짧은 스냅은
@@ -5234,7 +5255,8 @@ function _placePerfClip(x, y, beat, presetId, pickedBars) {
       const ed = p.arm === d.arm ? d : { ...d, arm: p.arm };
       const need    = _perfHandoffDur(peak,
                         computeStrikePose(ed, 'raise',  'hard'),
-                        computeStrikePose(ed, 'strike', 'hard'), p.arm).total;
+                        computeStrikePose(ed, 'strike', 'hard'), p.arm,
+                        _clipVelBudget(presetId)).total;
       const tailAt  = _perfClipTailStartAt(presetId, pickedBars, p.arm);
       // 클립 안에서 하강에 쓸 수 있는 시간(최고점 도달 ~ 클립 끝)
       const inClip  = pickedBars * beatsPerBar * beatDur * (1 - tailAt);
@@ -6122,9 +6144,18 @@ window.checkClipRealVelocity = function (clipId, bars, sampleMs = 5) {
     }
     prevAngles = cur; prevT = t;
   }
+  // 클립이 자체 속도 예산을 선언했으면(clip.velBudget) 그 관절은 그 값을
+  // 기준으로 퍼센트를 낸다 — 전역 _JOINT_MAX_VEL이 실제 모터보다 훨씬
+  // 보수적인 placeholder라, 예산을 올린 클립을 기본 한계로 재면 실제로는
+  // 여유가 있는데도 초과로 보고된다.
+  const budget = clip.velBudget || null;
   const report = KEYS14
-    .map(k => ({ joint: k, vel: +peak[k].v.toFixed(3), atT: +peak[k].t.toFixed(3),
-                 limit: _JOINT_MAX_VEL[k], pct: Math.round(peak[k].v / (_JOINT_MAX_VEL[k] || 2) * 100) }))
+    .map(k => {
+      const lim = (budget && budget[k]) ?? _JOINT_MAX_VEL[k] ?? 2;
+      return { joint: k, vel: +peak[k].v.toFixed(3), atT: +peak[k].t.toFixed(3),
+               limit: lim, pct: Math.round(peak[k].v / lim * 100),
+               budgeted: !!(budget && budget[k]) };
+    })
     .sort((a, b) => b.pct - a.pct);
   return report;
 };
