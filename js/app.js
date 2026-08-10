@@ -2195,6 +2195,15 @@ function buildKeyframes() {
   const totalTime  = parseFloat((totalBeats * beatDur).toFixed(3));
   const preDur     = parseFloat(Math.max(0.12, Math.min(0.32, beatDur * 0.38)).toFixed(3));
 
+  // 파워 레이즈(등 velBudget을 쓰는 클립) 연계 구간의 시간대·팔·예산을
+  // 모아둔다 — computeVelAccel이 YAML 내보내기용 velocities/accelerations를
+  // 계산할 때 이 구간만 전역 _JOINT_MAX_VEL 대신 이 예산으로 클램프해야
+  // 한다. 그러지 않으면(실제로 있었던 버그) 포지션은 빠르게 움직이도록
+  // 계산됐는데 내보낸 velocity 필드는 훨씬 낮은 전역 한계로 잘려서, 실제
+  // 로봇에 포지션·속도가 서로 안 맞는 궤적이 나가 "타격 지점까지 못
+  // 내려온다"는 추종 오차가 실측됐다(사용자 실물 테스트).
+  const velRanges = [];
+
   const L_KEYS = ['L1','L2','L3','L4','L5','L6','L7'];
   const R_KEYS = ['R1','R2','R3','R4','R5','R6','R7'];
 
@@ -2352,8 +2361,13 @@ function buildKeyframes() {
           const peakPose   = _perfClipFinalPose(sp.evt.presetId, sp.bars, arm);
           const raisePose  = computeStrikePose(drum, 'raise',  vel);
           const strikePose = computeStrikePose(drum, 'strike', vel);
-          const { glide, snap } = _perfHandoffDur(peakPose, raisePose, strikePose, arm,
-                                                  _clipVelBudget(sp.evt.presetId));
+          const budget = _clipVelBudget(sp.evt.presetId);
+          const { glide, snap } = _perfHandoffDur(peakPose, raisePose, strikePose, arm, budget);
+          // 예산 구간 등록 — 클립 상승 시작(sp.start)부터 실제 타격 시각(t)
+          // 까지 전체(상승+대기+하강+스냅)를 이 팔의 velBudget으로 덮는다.
+          // computeVelAccel이 YAML 내보내기 시 여기서만 전역 한계 대신 이
+          // 값으로 클램프한다.
+          if (budget) velRanges.push({ start: sp.start, end: t, arm, budget });
           // 내려오기 시작할 수 있는 가장 이른 시각 = 클립이 최고점에 도달한
           // 시점(그 앞은 아직 올라가는 중이라 건드리면 안 됨).
           const tailAt    = _perfClipTailStartAt(sp.evt.presetId, sp.bars, arm);
@@ -2370,7 +2384,14 @@ function buildKeyframes() {
           addPose(poseMap, glideStart, peakPose, sideKeys);
           // 최고점 → raise 자세: smoothstep 위치에 경유점을 놓아 가감속이
           // 살아 있는 부드러운 하강(선형 등분할이면 등속이라 끊겨 보인다).
-          const STEPS = 4;
+          // ⚠ STEPS=4였을 때 실물 테스트에서 "타격 지점까지 못 내려온다"는
+          // 문제가 있었다 — 원인은 경유점이 너무 적어 이 구간의 실제
+          // Catmull-Rom 보간이 목표 속도(_perfHandoffDur가 계산한 예산)보다
+          // 37%나 더 빠르게 튀었기 때문(실측 확인: 목표 3.4rad/s인데 실제
+          // 4.66rad/s). 상승 구간에서 이미 겪었던 것과 같은 종류의 오버슈트
+          // (경유점이 적으면 스플라인 접선이 앞뒤 자세에 끌려 한쪽으로
+          // 몰림) — 그때 STEPS 5→8로 고쳤던 걸 여기 하강에도 동일 적용.
+          const STEPS = 8;
           for (let i = 1; i < STEPS; i++) {
             const tf    = i / STEPS;
             const stepT = parseFloat((glideStart + (snapT - glideStart) * tf).toFixed(3));
@@ -2635,7 +2656,7 @@ function buildKeyframes() {
       })
       .sort((a, b) => a.time - b.time);
 
-  return { L: toArray(L_poseMap), R: toArray(R_poseMap), totalTime };
+  return { L: toArray(L_poseMap), R: toArray(R_poseMap), totalTime, velRanges };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2651,14 +2672,32 @@ const _JOINT_MAX_ACC = {
   R1:3.0, R2:3.0, R3:4.0, R4:4.0, R5:5.0, R6:5.0, R7:5.0,
 };
 
-function computeVelAccel(kfs) {
+// ⚠ 실물 테스트에서 파워 레이즈가 "타격 지점까지 못 내려온다"는 추종
+// 오차가 있었다 — 원인은 여기 있었다. 포지션(kfs[i].angles)은 클립의
+// velBudget(예: J1 4.76rad/s)에 맞춰 빠르게 움직이도록 계산됐는데,
+// 이 함수가 velocities/accelerations를 내보낼 때 항상 전역 한계
+// _JOINT_MAX_VEL(J1=1.5)로 clamp해버려서, 로봇에 나가는 "포지션은 빠르게
+// 움직이라면서 속도 목표는 훨씬 낮게 잘린" 서로 안 맞는 궤적이 됐다.
+// velRanges(buildKeyframes가 파워 레이즈 연계 구간마다 채워둔 {start,end,
+// arm,budget})가 있으면 그 시간대·그 팔 관절만 예산으로 clamp한다.
+function _velLimitAt(k, time, velRanges) {
+  if (!velRanges || !velRanges.length) return _JOINT_MAX_VEL[k] ?? 2.0;
+  const arm = k[0]; // 'L' or 'R'
+  for (const r of velRanges) {
+    if (r.arm !== arm) continue;
+    if (time < r.start - 0.02 || time > r.end + 0.02) continue;
+    if (r.budget[k] != null) return r.budget[k];
+  }
+  return _JOINT_MAX_VEL[k] ?? 2.0;
+}
+
+function computeVelAccel(kfs, velRanges) {
   const n    = kfs.length;
   const keys = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
   const vel  = Array.from({ length: n }, () => ({}));
   const acc  = Array.from({ length: n }, () => ({}));
 
   keys.forEach(k => {
-    const maxV = _JOINT_MAX_VEL[k] ?? 2.0;
     const maxA = _JOINT_MAX_ACC[k] ?? 4.0;
 
     // 시작·끝: 정지 상태 (velocity = 0)
@@ -2668,6 +2707,7 @@ function computeVelAccel(kfs) {
     // 중간: 중앙 차분 (central difference)
     for (let i = 1; i < n - 1; i++) {
       const dt = kfs[i+1].time - kfs[i-1].time;
+      const maxV = _velLimitAt(k, kfs[i].time, velRanges);
       vel[i][k] = dt > 0
         ? clamp((kfs[i+1].angles[k] - kfs[i-1].angles[k]) / dt, -maxV, maxV)
         : 0;
@@ -2687,7 +2727,7 @@ window.exportYAML = function () {
   const kfs = buildFinalFlatTimeline();   // 인트로/아웃트로 포함 최종 타임라인
   if (kfs.length <= 1) { alert('타임라인에 드럼 이벤트를 추가하세요.'); return; }
 
-  const { vel, acc } = computeVelAccel(kfs);
+  const { vel, acc } = computeVelAccel(kfs, kfs.velRanges);
 
   const jointNames = [
     'openarmx_left_joint1','openarmx_left_joint2','openarmx_left_joint3','openarmx_left_joint4',
@@ -3875,9 +3915,13 @@ function buildMergedKeyframes() {
   const timeSet = new Set();
   split.L.forEach(kf => timeSet.add(kf.time.toFixed(3)));
   split.R.forEach(kf => timeSet.add(kf.time.toFixed(3)));
-  return Array.from(timeSet)
+  const out = Array.from(timeSet)
     .map(t => ({ time: parseFloat(t), angles: interpolateAngles(parseFloat(t), split) }))
     .sort((a, b) => a.time - b.time);
+  // 배열 자체에 얹어 전달 — 이후 slice/map을 거쳐도 이 참조를 명시적으로
+  // 다시 붙여줘야 하는 지점(buildTimelineWithIntroOutro)에서만 읽는다.
+  out.velRanges = split.velRanges;
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4132,6 +4176,7 @@ function buildTimelineWithIntroOutro(options = {}) {
 
   // 드럼 본편 (merged flat)
   let drumTL = buildMergedKeyframes();
+  const rawVelRanges = drumTL.velRanges || [];
   drumTL = removeHardResetPoint(drumTL);
   drumTL = retimeTooShortIntervals(drumTL, 0.030);
 
@@ -4197,6 +4242,10 @@ function buildTimelineWithIntroOutro(options = {}) {
     finalTL = [...finalTL, ...outro.slice(1)];
   }
 
+  // 인트로가 붙으면 본편 전체가 +4.0s 밀리므로(shiftTimeline(drumTL, 4.0))
+  // 예산 구간도 같은 만큼 밀어야 최종 flat 타임라인의 시각과 맞는다.
+  const introOff = includeIntro ? 4.0 : 0;
+  finalTL.velRanges = rawVelRanges.map(r => ({ ...r, start: r.start + introOff, end: r.end + introOff }));
   return finalTL;
 }
 
@@ -5140,16 +5189,15 @@ function _easedDur(fromPose, toPose, arm, margin, budget) {
 // 시뮬레이터 기본 한계 _JOINT_MAX_VEL(J1=1.5)은 실제 모터 정격보다 훨씬
 // 보수적인 placeholder다 — OpenArmX의 J1/J2는 RobStride 04이고, 제조사
 // 페이지 실측 기준 무부하 200rpm(20.94rad/s) / 정격부하 50rpm(5.24rad/s),
-// 정격토크 40N·m·피크 120N·m다. 1마디(1.752초) 안에서 풀 진폭 상승+하강+
-// 손목스냅을 끝내려면 J1에 약 3.4rad/s(=32.5rpm)가 필요한데, 이는 정격부하
-// 속도의 65%·무부하의 16% 수준이다. "정격부하 속도"는 정격토크를 계속 낼
-// 때의 속도지 상한이 아니고, 드럼 스틱 팔은 관성 위주라 정격토크에 한참
-// 못 미치므로 이 구간은 여유가 있다(토크-속도 곡선상 32.5rpm에서 45N·m급
-// 사용 가능). 참고로 이 앱의 일반 타격은 이미 손목(J7)을 스냅 구간에
-// 6~10rad/s로 돌리고 있고 실물에서 문제없이 동작한다(실측).
-// 영향 범위를 파워 레이즈 계열로 한정하기 위해 전역 한계는 건드리지 않고
-// 이 예산만 따로 둔다 — 실물 검증 후 조정할 것.
-const PERF_RAISE_J1_BUDGET = 3.4;
+// 정격토크 40N·m·피크 120N·m다. 각 클립의 velBudget(현재 4.76rad/s)이 실제
+// 값 — 여기 상수로 중복 선언하지 않는다(과거엔 3.4로 여기 있었으나 실물
+// 테스트 후 조정되며 이 상수만 갱신을 놓쳐 실제 값과 어긋난 적이 있었다).
+// 4.76은 정격부하속도의 91%·무부하의 23% — "정격부하 속도"는 정격토크를
+// 계속 낼 때의 속도지 상한이 아니고, 드럼 스틱 팔은 관성 위주라 정격토크에
+// 한참 못 미치므로 이 구간은 여유가 있다. 참고로 이 앱의 일반 타격은 이미
+// 손목(J7)을 스냅 구간에 6~10rad/s로 돌리고 있고 실물에서 문제없이
+// 동작한다(실측). 영향 범위를 파워 레이즈 계열로 한정하기 위해 전역
+// 한계는 건드리지 않고 클립별 예산만 따로 둔다 — 실물 재검증 후 조정할 것.
 /** 클립이 자체 속도 예산(clip.velBudget)을 선언했으면 그 값, 없으면 null. */
 function _clipVelBudget(presetId) {
   const clip = (typeof PERFORMANCE_CLIPS !== 'undefined') ? PERFORMANCE_CLIPS[presetId] : null;
@@ -5163,7 +5211,12 @@ const _smoothstep = x => x * x * (3 - 2 * x);
  *         "천천히 내려오는" 게 아니라 실제 타격처럼 보인다(사용자 지적).
  *  일반 타격의 raise→strike와 같은 구조라 타격감이 기존 비트와 일치한다. */
 function _perfHandoffDur(peakPose, raisePose, strikePose, arm, budget) {
-  const glide = _easedDur(peakPose, raisePose, arm, 1.5, budget);
+  // margin 1.5는 smoothstep 이론상 정확히 맞아떨어지는 값이지만(피크 속도
+  // = 평균×1.5), 실제로는 Catmull-Rom이 이 구간 앞뒤(홀드 자세·raise 자세)
+  // 접선에 끌려 37% 더 튀는 게 실측 확인됐다(위 STEPS=8 주석 참고) — 상승
+  // 구간에서 같은 문제를 겪었을 때도 여유를 1.6→2.1로 올려서 잡았으므로
+  // 여기도 동일하게 올린다.
+  const glide = _easedDur(peakPose, raisePose, arm, 2.1, budget);
   // 스냅 구간은 일반 타격의 raise→strike와 "같은 시간"(preDur)을 쓴다 —
   // 관절 속도 한계에서 역산하면 0.5초 가까이 나와 오히려 일반 비트보다
   // 느려져서 타격처럼 안 보였다(실측). 손목(J7) 한 축만 도는 짧은 스냅은
