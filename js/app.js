@@ -44,24 +44,23 @@ const VEL_GLOW = {
 // 로봇 동작에는 영향이 없다 — MIDI 원곡 킥 타점을 타임라인에서 확인만
 // 하기 위해 넣어둔 것.
 let drumKit = [
-  // ─ L팔 ─────────────────────────────────────────────────────────
-  // 2026-08-10: 사용자가 실제로 쓰던 배치를 기본값으로 확정(스크린샷 제공).
-  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.58, y: 0.46,  z:0.25} },
-  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.79, y: 0.34,  z:0.35} },
-  { id:'d2', name:'스네어',      type:'snare', arm:'L', pos:{x:0.59, y:-0.01,  z:0.18} },
-  { id:'d3', name:'스몰 탐',     type:'tom_h', arm:'L', pos:{x:0.80, y: 0.15,  z:0.30} },
-  // ─ R팔 ─────────────────────────────────────────────────────────
-  { id:'d4', name:'킥 (베이스 드럼)', type:'kick', arm:'R', pos:{x:0.63, y: 0.00,  z:0.12} },
-  { id:'d5', name:'미들 탐',     type:'tom_m', arm:'R', pos:{x:0.80, y:-0.15,  z:0.30} },
-  { id:'d6', name:'플로어 탐',   type:'tom_f', arm:'R', pos:{x:0.54, y:-0.50,  z:0.18} },
-  { id:'d7', name:'라이드 심벌', type:'ride',  arm:'R', pos:{x:0.72, y:-0.37,  z:0.35} },
+  // 2026-08-10: 사용자가 저장한 프로젝트 파일(magicexe_project_202608100019379.json)
+  // 기준으로 기본 배치 확정.
+  { id:'d0', name:'하이 햇', type:'hihat', arm:'L', pos:{x:0.552, y:0.475, z:0.3} },
+  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.747, y:0.353, z:0.35} },
+  { id:'d2', name:'스네어', type:'snare', arm:'R', pos:{x:0.59, y:0, z:0.17} },
+  { id:'d3', name:'스몰 탐', type:'tom_h', arm:'L', pos:{x:0.8, y:0.15, z:0.3} },
+  { id:'d4', name:'킥 (베이스 드럼)', type:'kick', arm:'R', pos:{x:0.63, y:0, z:0.12} },
+  { id:'d5', name:'미들 탐', type:'tom_m', arm:'R', pos:{x:0.8, y:-0.15, z:0.3} },
+  { id:'d6', name:'플로어 탐', type:'tom_f', arm:'R', pos:{x:0.525, y:-0.575, z:0.18} },
+  { id:'d7', name:'라이드 심벌', type:'ride', arm:'R', pos:{x:0.735, y:-0.418, z:0.35} },
 ];
 // id는 비연속(d4 없음)일 수 있으므로 개수가 아니라 최대 id+1로 다음 id를 잡는다.
 let nextDrumId = Math.max(8, ...drumKit.map(d => parseInt(d.id.replace(/\D/g, '')) + 1));
 
 // 기본값 스냅샷 (초기화 버튼용)
 const DEFAULT_DRUM_KIT = drumKit.map(d => ({...d, pos: {...d.pos}}));
-const _DK_STORE = 'openarmx_drum_kit_v19';
+const _DK_STORE = 'openarmx_drum_kit_v20';
 
 function saveDrumKit() {
   try { localStorage.setItem(_DK_STORE, JSON.stringify(drumKit)); } catch(e) {}
@@ -210,7 +209,7 @@ function _checkTemplateDirty() {
 //  설정·타임라인 영속 (localStorage) — 강력 새로고침에도 유지
 // ═══════════════════════════════════════════════════════════════
 const _SETTINGS_STORE = 'openarmx_settings_v1';
-const _TIMELINE_STORE = 'openarmx_timeline_v1';
+const _TIMELINE_STORE = 'openarmx_timeline_v2';
 
 function saveSettings() {
   try {
@@ -339,8 +338,8 @@ function _tlAppendHits(evts) {
 // ═══════════════════════════════════════════════════════════════
 // 기본 타임라인 — robot_drum_all.yaml(MAGIC.EXE 원곡 MIDI 변환본, 137.000064BPM) 1459개
 // 타격을 그대로 매핑한 값. 사용자가 프로젝트 파일(JSON)을 불러오면 이 기본값은 덮어써진다.
-// 기본 타임라인 — 사용자가 검토·수정한 프로젝트 파일(magicexe_project_202607290818523.json)
-// 기준, 1217개 타격. 사용자가 다른 프로젝트 파일(JSON)을 불러오면 이 기본값은 덮어써진다.
+// 기본 타임라인 — 사용자가 저장한 프로젝트 파일
+// (magicexe_project_202608100019379.json) 기준, 1174개 타격.
 // 기본 타임라인 — 사용자가 검토·수정한 프로젝트 파일(magicexe_project_202607292353293.json)
 // 기준, 1152개 타격(스네어/라이드 동시타격 충돌 재타이밍으로 해결됨).
 let timelineEvents = [
@@ -368,7 +367,6 @@ let timelineEvents = [
   {drumId:'d0',beat:27.5,vel:'hard'},
   {drumId:'d4',beat:28,vel:'hard'},
   {drumId:'d2',beat:28,vel:'hard'},
-  {drumId:'d0',beat:28.5,vel:'hard'},
   {drumId:'d4',beat:29,vel:'hard'},
   {drumId:'d0',beat:29.5,vel:'hard'},
   {drumId:'d4',beat:30,vel:'hard'},
@@ -1102,7 +1100,6 @@ let timelineEvents = [
   {drumId:'d4',beat:320.5,vel:'hard'},
   {drumId:'d4',beat:320.75,vel:'hard'},
   {drumId:'d5',beat:322.5,vel:'hard'},
-  {drumId:'d3',beat:322.75,vel:'hard'},
   {drumId:'d4',beat:323.5,vel:'hard'},
   {drumId:'d0',beat:324,vel:'hard'},
   {drumId:'d4',beat:324.5,vel:'hard'},
@@ -1339,7 +1336,6 @@ let timelineEvents = [
   {drumId:'d2',beat:406,vel:'hard'},
   {drumId:'d0',beat:406.5,vel:'hard'},
   {drumId:'d4',beat:407,vel:'hard'},
-  {drumId:'d2',beat:407,vel:'hard'},
   {drumId:'d0',beat:407.5,vel:'hard'},
   {drumId:'d4',beat:407.5,vel:'hard'},
   {drumId:'d2',beat:408,vel:'hard'},
@@ -1495,7 +1491,32 @@ let timelineEvents = [
   {drumId:'d7',beat:413,vel:'hard',arm:'R'},
   {drumId:'d7',beat:441,vel:'hard',arm:'R'},
   {drumId:'d2',beat:434,vel:'hard',arm:'L'},
-  {drumId:'d1',beat:138.5,vel:'hard',arm:'R'}
+  {drumId:'d3',beat:322.5,vel:'hard',arm:'L'},
+  {drumId:'d0',beat:1.5,vel:'hard',arm:'L'},
+  {drumId:'d1',beat:2.5,vel:'hard',arm:'L'},
+  {drumId:'d3',beat:3.5,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:4.5,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:5.5,vel:'hard',arm:'R'},
+  {drumId:'d5',beat:6.5,vel:'hard',arm:'R'},
+  {drumId:'d2',beat:10,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:11,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:12,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:13,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:14,vel:'hard',arm:'L'},
+  {drumId:'d2',beat:10.5,vel:'hard',arm:'R'},
+  {drumId:'d2',beat:11.5,vel:'hard',arm:'R'},
+  {drumId:'d2',beat:12.5,vel:'hard',arm:'R'},
+  {drumId:'d2',beat:13.5,vel:'hard',arm:'R'},
+  {drumId:'d2',beat:14.5,vel:'hard',arm:'R'},
+  {drumId:'d7',beat:16,vel:'hard',arm:'R'},
+  {drumId:'d1',beat:16,vel:'hard',arm:'L'},
+  {drumId:'d3',beat:18,vel:'hard',arm:'L'},
+  {drumId:'d5',beat:18,vel:'hard',arm:'R'},
+  {drumId:'d0',beat:20,vel:'hard',arm:'L'},
+  {drumId:'d6',beat:20,vel:'hard',arm:'R'},
+  {drumId:'d0',beat:28.5,vel:'hard',arm:'L'},
+  {drumId:'d6',beat:7.5,vel:'hard',arm:'R'},
+  {drumId:'d7',beat:8.5,vel:'hard',arm:'R'},
 ];
 // 사이트 첫 접속 시 표출되는 기본 상태 스냅샷 — SUNO 트랙(전용 패턴으로
 // 타임라인을 통째로 교체)에서 다시 Mastering/Bitcrush로 돌아올 때 이
