@@ -4994,7 +4994,7 @@ function _createHitEl(drum, evt, splitArm, typeInfo) {
     function onMove(me) {
       if (Math.abs(me.clientX - startX) > 3) moved = true;
       const newBeat = beatAt(me.clientX);
-      if (_isBeatInPerf(newBeat)) return; // 퍼포먼스 구간엔 놓을 수 없음
+      if (_isBeatInPerf(newBeat, effArm)) return; // 그 팔을 쓰는 퍼포먼스 구간엔 놓을 수 없음
       if (newBeat !== evt.beat) {
         evt.beat = newBeat;
         hit.style.left   = ((evt.beat - 1) * PX_PER_BEAT) + 'px';
@@ -5292,7 +5292,12 @@ function _placePerfClip(x, y, beat, presetId, pickedBars) {
   }
   const picks = [];
   const finish = () => {
-    timelineEvents.push({ type: 'perf', presetId, beat, bars: pickedBars });
+    // linkedStrikes: 이 클립이 낳은 타격을 기록해둔다(drumId·arm·클립 끝
+    // 기준 상대 박자 오프셋) — 블록을 드래그로 옮기거나 삭제하면 이 정보로
+    // 짝지어진 타격도 같이 옮기거나 지운다(사용자 지적: "드래그해서 옮기면
+    // 그때 생긴 타격이 따로 분리되는 것 같다").
+    const perfEvt = { type: 'perf', presetId, beat, bars: pickedBars, linkedStrikes: [] };
+    timelineEvents.push(perfEvt);
     // 타격 시점 — 최고점에서 타격 자세까지 내려오는 데 필요한 시간을
     // 확보할 수 있는 가장 이른 박자에 놓는다. 무조건 클립 끝 박자에 붙이면
     // 내려올 시간이 0이라 관절이 튄다(실측 확인) — 클립의 평평한 최고점
@@ -5337,6 +5342,7 @@ function _placePerfClip(x, y, beat, presetId, pickedBars) {
       });
       if (between) { blocked.push(armKr); return; }
       timelineEvents.push({ drumId: p.drumId, beat: endBeat, vel: 'hard', arm: p.arm });
+      perfEvt.linkedStrikes.push({ drumId: p.drumId, arm: p.arm, beatOffset: endBeat - clipEndBeat });
     });
     _commitTimeline();
     const placed = picks.length - skipped.length - blocked.length;
@@ -5392,8 +5398,27 @@ function _buildPerfLane(totalW, div, totalBeats) {
     block.innerHTML =
       `<span class="tl-perf-block-name">${clip ? clip.name : '?'}</span>` +
       `<button class="tl-perf-block-del" title="삭제">✕</button>`;
+    // 이 클립이 낳은 타격들(evt.linkedStrikes)을 지금의 evt.beat/bars 기준
+    // 클립 끝에서 찾아 반환 — 드래그·삭제·재선택 공통으로 쓴다.
+    function _findLinkedStrikeEvts() {
+      if (!evt.linkedStrikes?.length) return [];
+      const curBars = clip ? _clipKeysForBars(clip, evt.bars).bars : Math.max(1, evt.bars || 1);
+      const curEndBeat = evt.beat + curBars * beatsPerBar;
+      return evt.linkedStrikes.map(ls => {
+        const expectedBeat = curEndBeat + ls.beatOffset;
+        const found = timelineEvents.find(e =>
+          e.type !== 'perf' && e.drumId === ls.drumId && Math.abs(e.beat - expectedBeat) < 0.01 && _effArm(e) === ls.arm);
+        return found ? { link: ls, strikeEvt: found } : null;
+      }).filter(Boolean);
+    }
     block.querySelector('.tl-perf-block-del').addEventListener('click', e => {
       e.stopPropagation();
+      // 이 클립이 낳은 타격도 함께 지운다 — 남겨두면 클립 없이 갑자기 팔이
+      // 최고점에서 이어받을 데가 없는 타격만 붙어있게 된다.
+      _findLinkedStrikeEvts().forEach(({ strikeEvt }) => {
+        const si = timelineEvents.indexOf(strikeEvt);
+        if (si >= 0) timelineEvents.splice(si, 1);
+      });
       const idx = timelineEvents.indexOf(evt);
       if (idx >= 0) timelineEvents.splice(idx, 1);
       renderTimeline();
@@ -5403,8 +5428,20 @@ function _buildPerfLane(totalW, div, totalBeats) {
       e.stopPropagation();
       if (performance.now() < _tlDragSuppressClickUntil) return; // 드래그 직후 트레일링 클릭 무시
       _showPerfClipMenu(e.clientX, e.clientY, (presetId, pickedBars) => {
+        // 클립 종류·마디 수가 바뀌면 클립 끝 박자도 바뀌므로, 링크된
+        // 타격들을 새 끝 박자 기준으로 같이 옮겨둔다(옮길 수 없으면
+        // 그대로 둔다 — 충돌 검사까지 다시 하진 않음, 필요하면 사용자가
+        // 직접 조정).
+        const linked = _findLinkedStrikeEvts();
+        const oldEndBeat = evt.beat + bars * beatsPerBar;
         evt.presetId = presetId;
         evt.bars = pickedBars;
+        const newClip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[presetId] : null;
+        const newBars = newClip ? _clipKeysForBars(newClip, pickedBars).bars : Math.max(1, pickedBars || 1);
+        const newEndBeat = evt.beat + newBars * beatsPerBar;
+        linked.forEach(({ link, strikeEvt }) => {
+          strikeEvt.beat = parseFloat((newEndBeat + link.beatOffset).toFixed(4));
+        });
         renderTimeline();
         saveTimeline();
       });
@@ -5421,6 +5458,11 @@ function _buildPerfLane(totalW, div, totalBeats) {
       const dragBars   = blockBeats;
       const maxBeat    = Math.max(1, totalBeats + 1 - dragBars);
       let moved = false;
+      // 이 클립이 낳은 타격들 — 블록이 옮겨진 만큼(delta) 같이 옮긴다
+      // (사용자 지적: "드래그해서 옮기면 그때 생긴 타격이 따로 분리된다").
+      const linkedStrikeEvts = _findLinkedStrikeEvts();
+      const startBeat = evt.beat;
+      const origStrikeBeats = linkedStrikeEvts.map(l => l.strikeEvt.beat);
       function onMove(me) {
         const dx = me.clientX - startX;
         if (Math.abs(dx) > 3) moved = true;
@@ -5429,6 +5471,10 @@ function _buildPerfLane(totalW, div, totalBeats) {
         if (newBeat !== evt.beat) {
           evt.beat = newBeat;
           block.style.left = ((evt.beat - 1) * PX_PER_BEAT) + 'px';
+          const delta = newBeat - startBeat;
+          linkedStrikeEvts.forEach((l, i) => {
+            l.strikeEvt.beat = parseFloat((origStrikeBeats[i] + delta).toFixed(4));
+          });
         }
       }
       function onUp() {
@@ -5549,13 +5595,23 @@ function renderTimeline() {
     lane.appendChild(_laneGridFragment(div));
 
     // 퍼포먼스가 점유한 구간은 이 레인에서도 시각적으로 비활성 표시
-    // (해당 구간은 addEvent()에서 클릭해도 무시되므로 UI로도 그 사실을 알려야 함).
+    // (해당 구간은 addEvent()에서 클릭해도 무시되므로 UI로도 그 사실을 알려야
+    // 함). 파워 레이즈처럼 한 팔만 쓰는 클립은 그 팔의 절반만 막는다 —
+    // 다른 팔은 계속 타격 가능하므로(사용자 요청) 레인 전체를 가리면 안 됨.
+    // 킥(splitArm=false, 팔 없음)은 양팔 클립일 때만 막는다.
     _perfOccupiedBeatRanges().forEach(r => {
+      if (!splitArm && r.arms.length < 2) return; // 킥은 한 팔짜리 클립엔 안 막힘
       const mask = document.createElement('div');
       mask.className   = 'tl-perf-mask';
       mask.style.left  = ((r.start - 1) * PX_PER_BEAT) + 'px';
       mask.style.width = ((r.end - r.start) * PX_PER_BEAT) + 'px';
-      mask.title = '퍼포먼스 구간 — 타격 배치 불가';
+      if (splitArm && r.arms.length === 1) {
+        mask.style.top    = r.arms[0] === 'L' ? '0' : '50%';
+        mask.style.height = '50%';
+        mask.title = `퍼포먼스 구간(${r.arms[0] === 'L' ? '왼팔' : '오른팔'}) — 이 팔은 타격 배치 불가`;
+      } else {
+        mask.title = '퍼포먼스 구간 — 타격 배치 불가';
+      }
       lane.appendChild(mask);
     });
 
@@ -5705,31 +5761,44 @@ function _effArm(evt) {
   return d?.arm;
 }
 
-// 퍼포먼스가 점유한 마디 구간(beat 좌표계, 1-based) — 이 구간 동안엔
-// 드럼 타격을 넣을 수 없다(양팔이 퍼포먼스 포즈로 점유돼 있음).
+// 퍼포먼스가 점유한 마디 구간(beat 좌표계, 1-based) — 이 구간 동안엔 그
+// 구간을 쓰는 팔의 드럼 타격을 넣을 수 없다(그 팔이 퍼포먼스 포즈로
+// 점유돼 있음). 파워 레이즈처럼 한 팔만 쓰는 클립은 arms가 그 팔 하나뿐
+// 이라 다른 팔은 계속 타격할 수 있다(사용자 요청: "파워레이즈 왼팔일
+// 경우 오른팔은 타격을 이어갈 수 있는거지"). 그 외(양팔을 쓰는 일반
+// 클립)는 arms가 ['L','R']로 여전히 양팔 다 막는다.
 function _perfOccupiedBeatRanges() {
   return timelineEvents
     .filter(e => e.type === 'perf')
     .map(e => {
       const clip = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS[e.presetId] : null;
       const bars = clip ? _clipKeysForBars(clip, e.bars).bars : Math.max(1, e.bars || 1);
-      return { start: e.beat, end: e.beat + bars * beatsPerBar };
+      const arms = _powerRaiseArms(e.presetId) || ['L', 'R'];
+      return { start: e.beat, end: e.beat + bars * beatsPerBar, arms };
     });
 }
-function _isBeatInPerf(beat) {
-  return _perfOccupiedBeatRanges().some(r => beat >= r.start && beat < r.end);
+// arm이 없으면(킥 — 팔 개념 자체가 없음) 양팔을 다 쓰는 구간에서만 막고,
+// 한 팔짜리 파워 레이즈 구간에서는 킥을 허용한다.
+function _isBeatInPerf(beat, arm) {
+  return _perfOccupiedBeatRanges().some(r => {
+    if (beat < r.start || beat >= r.end) return false;
+    if (r.arms.length >= 2) return true;
+    return arm && r.arms.includes(arm);
+  });
 }
 
 // arm을 명시하면(레인의 클릭된 절반) 그 팔로 배치, 생략하면 드럼 기본 팔 사용.
 function addEvent(drumId, beat, arm) {
-  // 퍼포먼스 구간에 겹치는 타격은 무시 — 그 구간의 팔 자세는 퍼포먼스가
-  // 전담하므로 드럼 타격이 끼어들면 안 된다(사용자 지적: "퍼포먼스가
-  // 삽입되면 타임라인의 드럼키트에 따라서 움직이면 안 되니까").
-  if (_isBeatInPerf(beat)) return;
   const drum = drumKit.find(d => d.id === drumId);
 
-  // 킥은 팔 충돌 없음 — 토글도 드럼+박자만으로 충분(팔 개념 자체가 없음)
+  // 킥은 팔 충돌 없음 — 토글도 드럼+박자만으로 충분(팔 개념 자체가 없음).
+  // 퍼포먼스 구간에 겹치는 타격은 무시 — 그 구간을 쓰는 팔의 자세는
+  // 퍼포먼스가 전담하므로 드럼 타격이 끼어들면 안 된다(사용자 지적:
+  // "퍼포먼스가 삽입되면 타임라인의 드럼키트에 따라서 움직이면 안 되니까").
+  // 한 팔짜리 파워 레이즈면 다른 팔은 계속 타격 가능(_isBeatInPerf가 arm
+  // 인자로 판단) — 킥은 arm이 없어 양팔 클립에서만 막힌다.
   if (!drum || drum.type === 'kick') {
+    if (_isBeatInPerf(beat)) return;
     const sameIdx = timelineEvents.findIndex(e => e.drumId === drumId && Math.abs(e.beat - beat) < 0.01);
     if (sameIdx >= 0) { timelineEvents.splice(sameIdx, 1); _commitTimeline(); return; }
     timelineEvents.push({ drumId, beat, vel: defaultVel });
@@ -5738,6 +5807,7 @@ function addEvent(drumId, beat, arm) {
   }
 
   const useArm = (arm === 'L' || arm === 'R') ? arm : drum.arm;
+  if (_isBeatInPerf(beat, useArm)) return;
 
   // ── 토글: 같은 드럼·같은 박자·같은 팔 → 제거. 팔이 다르면(예: 같은 드럼을
   // 왼팔은 이미 치고 있고 오른쪽 절반을 클릭) 토글하지 않고 아래로 내려가
