@@ -45,22 +45,23 @@ const VEL_GLOW = {
 // 하기 위해 넣어둔 것.
 let drumKit = [
   // ─ L팔 ─────────────────────────────────────────────────────────
-  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.62, y: 0.41,  z:0.25} },
-  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.78, y: 0.27,  z:0.35} },
-  { id:'d2', name:'스네어',      type:'snare', arm:'R', pos:{x:0.59, y: 0.00,  z:0.20} },
-  { id:'d3', name:'스몰 탐',     type:'tom_h', arm:'L', pos:{x:0.80, y: 0.10,  z:0.35} },
+  // 2026-08-10: 사용자가 실제로 쓰던 배치를 기본값으로 확정(스크린샷 제공).
+  { id:'d0', name:'하이 햇',     type:'hihat', arm:'L', pos:{x:0.58, y: 0.46,  z:0.25} },
+  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.79, y: 0.34,  z:0.35} },
+  { id:'d2', name:'스네어',      type:'snare', arm:'L', pos:{x:0.59, y:-0.01,  z:0.18} },
+  { id:'d3', name:'스몰 탐',     type:'tom_h', arm:'L', pos:{x:0.80, y: 0.15,  z:0.30} },
   // ─ R팔 ─────────────────────────────────────────────────────────
   { id:'d4', name:'킥 (베이스 드럼)', type:'kick', arm:'R', pos:{x:0.63, y: 0.00,  z:0.12} },
-  { id:'d5', name:'미들 탐',     type:'tom_m', arm:'R', pos:{x:0.80, y:-0.10,  z:0.35} },
-  { id:'d6', name:'플로어 탐',   type:'tom_f', arm:'R', pos:{x:0.56, y:-0.44,  z:0.20} },
-  { id:'d7', name:'라이드 심벌', type:'ride',  arm:'R', pos:{x:0.72, y:-0.33,  z:0.35} },
+  { id:'d5', name:'미들 탐',     type:'tom_m', arm:'R', pos:{x:0.80, y:-0.15,  z:0.30} },
+  { id:'d6', name:'플로어 탐',   type:'tom_f', arm:'R', pos:{x:0.54, y:-0.50,  z:0.18} },
+  { id:'d7', name:'라이드 심벌', type:'ride',  arm:'R', pos:{x:0.72, y:-0.37,  z:0.35} },
 ];
 // id는 비연속(d4 없음)일 수 있으므로 개수가 아니라 최대 id+1로 다음 id를 잡는다.
 let nextDrumId = Math.max(8, ...drumKit.map(d => parseInt(d.id.replace(/\D/g, '')) + 1));
 
 // 기본값 스냅샷 (초기화 버튼용)
 const DEFAULT_DRUM_KIT = drumKit.map(d => ({...d, pos: {...d.pos}}));
-const _DK_STORE = 'openarmx_drum_kit_v18';
+const _DK_STORE = 'openarmx_drum_kit_v19';
 
 function saveDrumKit() {
   try { localStorage.setItem(_DK_STORE, JSON.stringify(drumKit)); } catch(e) {}
@@ -2215,7 +2216,12 @@ function buildKeyframes() {
       const start = parseFloat(((e.beat - 1) * beatDur).toFixed(3));
       return { evt: e, clip, bars, keys, start, end: parseFloat((start + bars * beatsPerBar * beatDur).toFixed(3)) };
     });
-  const _tInsidePerf = t => perfSpans.some(sp => t >= sp.start && t < sp.end);
+  // 끝 경계는 살짝 열어둔다(EPS) — 구간 끝 시각과 그 박자의 타격 시각을
+  // 각각 toFixed(3)로 반올림하다 보면 1ms 차이로 끝 박자의 타격이 "구간
+  // 안"으로 판정돼 통째로 무시되는 일이 있었다(파워 레이즈 연계 타격이
+  // 클립 끝에 딱 붙을 때 실제로 발생 — 소리는 나는데 팔은 안 움직임).
+  const _PERF_EDGE_EPS = 0.005;
+  const _tInsidePerf = t => perfSpans.some(sp => t >= sp.start && t < sp.end - _PERF_EDGE_EPS);
   const _perfBetween = (tA, tB) => perfSpans.some(sp => sp.start >= tA && sp.start < tB);
 
   /** 퍼포먼스 span → { L?: 잘라낼 시각, R?: ... } — 그 시각 이후의 클립
@@ -2297,10 +2303,14 @@ function buildKeyframes() {
         // (사용자 지적: "퍼포먼스 이후 타격이 될 수 있는데 갑자기 튀는
         // 현상 없이 이어져야"). 직전 퍼포먼스 종료 시각으로 raiseT를
         // 클램프하고, 그 경우 진짜 유휴 시간이 있을 때만 대기 홀드를 채운다.
+        // 여기도 끝 경계에 허용오차를 준다 — 클립 끝 박자에 딱 붙은 타격은
+        // 반올림 때문에 sp.end(…862) > t(…861)가 되어 "직전 퍼포먼스"로
+        // 인식되지 않고, 그러면 연계(최고점→타격) 분기를 못 타서 팔이
+        // 대기 자세에 있다가 타격만 툭 나오는 문제가 있었다(실측 확인).
         const precedingPerfSpan = perfSpans
-          .filter(sp => sp.end <= t)
+          .filter(sp => sp.end <= t + _PERF_EDGE_EPS)
           .reduce((best, sp) => (!best || sp.end > best.end) ? sp : best, null);
-        const precedingPerfEnd = precedingPerfSpan ? precedingPerfSpan.end : 0;
+        const precedingPerfEnd = precedingPerfSpan ? Math.min(precedingPerfSpan.end, t) : 0;
 
         // ── 퍼포먼스 클립이 끝나는 바로 그 박자의 타격(파워 레이즈 연계) ──
         // 이 경우 raiseT·t·클립 마지막 키프레임이 전부 같은 시각이라, 나중에
@@ -2319,32 +2329,37 @@ function buildKeyframes() {
         if (isPerfHandoff) {
           const sp = precedingPerfSpan;
           const peakPose   = _perfClipFinalPose(sp.evt.presetId, sp.bars, arm);
+          const raisePose  = computeStrikePose(drum, 'raise',  vel);
           const strikePose = computeStrikePose(drum, 'strike', vel);
-          const descentDur = _perfDescentDur(peakPose, strikePose, arm);
+          const { glide, snap } = _perfHandoffDur(peakPose, raisePose, strikePose, arm);
           // 내려오기 시작할 수 있는 가장 이른 시각 = 클립이 최고점에 도달한
           // 시점(그 앞은 아직 올라가는 중이라 건드리면 안 됨).
           const tailAt    = _perfClipTailStartAt(sp.evt.presetId, sp.bars, arm);
           const tailStart = sp.start + (sp.end - sp.start) * tailAt;
-          const descentStart = parseFloat(Math.max(tailStart, t - descentDur).toFixed(3));
-          // 클립의 평평한 최고점 대기 구간 중 descentStart 이후는 주입하지
+          const snapT       = parseFloat(Math.max(tailStart + 0.02, t - snap).toFixed(3));
+          const glideStart  = parseFloat(Math.max(tailStart, snapT - glide).toFixed(3));
+          // 클립의 평평한 최고점 대기 구간 중 하강 시작 이후는 주입하지
           // 않는다(내려오는 구간을 덮어쓰지 않게).
-          if (descentStart < sp.end - 0.0005) {
+          if (glideStart < sp.end - 0.0005) {
             const cut = perfTailCut.get(sp) || {};
-            cut[arm] = descentStart;
+            cut[arm] = glideStart;
             perfTailCut.set(sp, cut);
           }
-          addPose(poseMap, descentStart, peakPose, sideKeys);
-          const STEPS = 8;
+          addPose(poseMap, glideStart, peakPose, sideKeys);
+          // 최고점 → raise 자세: smoothstep 위치에 경유점을 놓아 가감속이
+          // 살아 있는 부드러운 하강(선형 등분할이면 등속이라 끊겨 보인다).
+          const STEPS = 4;
           for (let i = 1; i < STEPS; i++) {
-            const frac  = i / STEPS;
-            const stepT = parseFloat((descentStart + (t - descentStart) * frac).toFixed(3));
-            if (stepT <= descentStart || stepT >= t) continue;
+            const tf    = i / STEPS;
+            const stepT = parseFloat((glideStart + (snapT - glideStart) * tf).toFixed(3));
+            if (stepT <= glideStart || stepT >= snapT) continue;
+            const e = _smoothstep(tf);
             const stepPose = {};
-            sideKeys.forEach(k => {
-              stepPose[k] = peakPose[k] + (strikePose[k] - peakPose[k]) * frac;
-            });
+            sideKeys.forEach(k => { stepPose[k] = peakPose[k] + (raisePose[k] - peakPose[k]) * e; });
             addPose(poseMap, stepT, stepPose, sideKeys);
           }
+          // raise 자세(손목 코킹) — 여기서 타격까지가 손목 스냅 구간이다.
+          if (snapT > glideStart + 0.001) addPose(poseMap, snapT, raisePose, sideKeys);
         } else {
           if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
           const holdStart = precedingPerfEnd;
@@ -5083,19 +5098,38 @@ function _perfClipTailStartAt(presetId, wantBars, arm) {
   return keys[i].at;
 }
 
-/** 최고점 자세 → 타격 자세로 내려오는 데 필요한 최소 시간 — 관절별
- *  (각도차/한계속도) 중 최댓값에 여유를 곱한다. 드럼마다 각도차가 달라
- *  고정 상수로는 안 되고, Catmull-Rom이 등속이 아니라 구간 앞부분에
- *  속도가 몰리므로 여유가 필요하다(균등 분할 경유점과 함께 사용). */
-const PERF_DESCENT_MARGIN = 1.9;
-function _perfDescentDur(fromPose, toPose, arm) {
-  let dur = 0.18;
+/** 두 자세 사이를 "부드럽게(ease-in-out)" 움직이는 데 필요한 최소 시간.
+ *  smoothstep의 최고 속도는 평균의 1.5배라 margin 1.5면 한계에 딱 맞고,
+ *  그보다 크게 잡으면 여유가 생긴다. 예전엔 선형 등분할 경유점을 촘촘히
+ *  깔아 속도를 눌렀는데, 그러면 등속이라 "뚝뚝 끊어서 움직이는" 느낌이
+ *  났다(사용자 지적) — 이제 경유점을 smoothstep 위치에 놓아 가감속이
+ *  살아 있게 한다. */
+function _easedDur(fromPose, toPose, arm, margin) {
+  let dur = 0.12;
   _SIDE_KEYS[arm].forEach(k => {
     const lim  = _JOINT_MAX_VEL[k] ?? 1.5;
-    const need = (Math.abs((toPose[k] ?? 0) - (fromPose[k] ?? 0)) / lim) * PERF_DESCENT_MARGIN;
+    const need = (Math.abs((toPose[k] ?? 0) - (fromPose[k] ?? 0)) / lim) * margin;
     if (need > dur) dur = need;
   });
   return dur;
+}
+const _smoothstep = x => x * x * (3 - 2 * x);
+
+/** 파워 레이즈 최고점 → 타격까지를 2단계로 나눈 소요 시간.
+ *  glide: 최고점 → 그 드럼의 raise 자세(팔은 드럼 위로, 손목은 코킹된 상태)
+ *  snap : raise → strike (손목이 내리꽂히는 구간) — 이 마지막 스냅이 있어야
+ *         "천천히 내려오는" 게 아니라 실제 타격처럼 보인다(사용자 지적).
+ *  일반 타격의 raise→strike와 같은 구조라 타격감이 기존 비트와 일치한다. */
+function _perfHandoffDur(peakPose, raisePose, strikePose, arm) {
+  const glide = _easedDur(peakPose, raisePose, arm, 1.5);
+  // 스냅 구간은 일반 타격의 raise→strike와 "같은 시간"(preDur)을 쓴다 —
+  // 관절 속도 한계에서 역산하면 0.5초 가까이 나와 오히려 일반 비트보다
+  // 느려져서 타격처럼 안 보였다(실측). 손목(J7) 한 축만 도는 짧은 스냅은
+  // 이 앱의 모든 일반 타격이 이미 같은 방식으로 쓰고 있어, 여기만 느리게
+  // 잡으면 오히려 튀는 게 아니라 "밋밋한" 쪽으로 어긋난다.
+  const beatDur = 60 / bpm;
+  const snap = parseFloat(Math.max(0.12, Math.min(0.32, beatDur * 0.38)).toFixed(3));
+  return { glide, snap, total: glide + snap };
 }
 
 function _powerRaiseArms(presetId) {
@@ -5176,8 +5210,10 @@ function _placePerfClip(x, y, beat, presetId, pickedBars) {
       if (!d) return;
       const peak = _perfClipFinalPose(presetId, pickedBars, p.arm);
       if (!peak) return;
-      const strikePose = computeStrikePose(p.arm === d.arm ? d : { ...d, arm: p.arm }, 'strike', 'hard');
-      const need    = _perfDescentDur(peak, strikePose, p.arm);
+      const ed = p.arm === d.arm ? d : { ...d, arm: p.arm };
+      const need    = _perfHandoffDur(peak,
+                        computeStrikePose(ed, 'raise',  'hard'),
+                        computeStrikePose(ed, 'strike', 'hard'), p.arm).total;
       const tailAt  = _perfClipTailStartAt(presetId, pickedBars, p.arm);
       // 클립 안에서 하강에 쓸 수 있는 시간(최고점 도달 ~ 클립 끝)
       const inClip  = pickedBars * beatsPerBar * beatDur * (1 - tailAt);
