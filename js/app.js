@@ -5225,10 +5225,10 @@ function _showPerfClipMenu(x, y, onPick) {
 
   function render() {
     const clips = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS : {};
-    const filterHtml = `<div class="tl-perf-menu-filter">${[0.5, 1, 2, 3, 4].map(n =>
-      `<div class="tl-perf-menu-filter-item${n === selectedBars ? ' active' : ''}" data-bars="${n}">${n === 0.5 ? '반마디' : n + '마디'}</div>`
+    const filterHtml = `<div class="tl-perf-menu-filter">${[0.5, 0.75, 1, 2, 3, 4].map(n =>
+      `<div class="tl-perf-menu-filter-item${n === selectedBars ? ' active' : ''}" data-bars="${n}">${n === 0.5 ? '반마디' : n === 0.75 ? '4분의3마디' : n + '마디'}</div>`
     ).join('')}</div>`;
-    const barsLabel = n => n === 0.5 ? '반마디' : n + '마디';
+    const barsLabel = n => n === 0.5 ? '반마디' : n === 0.75 ? '4분의3마디' : n + '마디';
     const listHtml = Object.entries(clips).map(([id, c]) => {
       const { bars } = _clipKeysForBars(c, selectedBars);
       const note = bars !== selectedBars ? ` (${barsLabel(bars)}로 대체)` : '';
