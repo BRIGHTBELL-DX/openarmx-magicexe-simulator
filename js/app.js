@@ -2410,7 +2410,17 @@ function buildKeyframes() {
             addPose(poseMap, stepT, stepPose, sideKeys);
           }
           // raise 자세(손목 코킹) — 여기서 타격까지가 손목 스냅 구간이다.
-          if (snapT > glideStart + 0.001) addPose(poseMap, snapT, raisePose, sideKeys);
+          // isStrike=true로 표시해 접선을 0으로 만든다 — strike와 동일한
+          // 방식으로, raise를 그냥 지나가는 경유점이 아니라 "완전히 멈추는
+          // 대기 자세"로 취급한다. 시간은 하나도 늘리지 않고(추가 keyframe
+          // 없음) 앞 글라이드 구간의 곡선 모양만 바뀌어 자연스럽게 감속하며
+          // 도착한다 — 급정지 홀드를 끼워넣는 것보다 부드럽다(사용자 지적:
+          // "미세하게 조금씩 정지시간을 거는" 효과를 곡선 형태로 구현).
+          // 이렇게 하면 스냅 구간(raise→strike, 0.166초 고정)에 들어가는
+          // 진입 속도가 거의 0이 되어, 실물 서보가 그 짧은 시간 안에 죽여야
+          // 할 잔여 속도가 사라진다 — "타격 지점을 지나쳐 더 내려가는"
+          // 실측 오차(라이드 심벌 밑둥 타격)의 원인을 raise 지점에서 끊는다.
+          if (snapT > glideStart + 0.001) addPose(poseMap, snapT, raisePose, sideKeys, true);
         } else {
           if (raiseT < precedingPerfEnd) raiseT = precedingPerfEnd;
           const holdStart = precedingPerfEnd;
