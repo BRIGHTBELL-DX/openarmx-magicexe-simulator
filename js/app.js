@@ -5225,14 +5225,15 @@ function _showPerfClipMenu(x, y, onPick) {
 
   function render() {
     const clips = typeof PERFORMANCE_CLIPS !== 'undefined' ? PERFORMANCE_CLIPS : {};
-    const filterHtml = `<div class="tl-perf-menu-filter">${[1, 2, 3, 4].map(n =>
-      `<div class="tl-perf-menu-filter-item${n === selectedBars ? ' active' : ''}" data-bars="${n}">${n}마디</div>`
+    const filterHtml = `<div class="tl-perf-menu-filter">${[0.5, 1, 2, 3, 4].map(n =>
+      `<div class="tl-perf-menu-filter-item${n === selectedBars ? ' active' : ''}" data-bars="${n}">${n === 0.5 ? '반마디' : n + '마디'}</div>`
     ).join('')}</div>`;
+    const barsLabel = n => n === 0.5 ? '반마디' : n + '마디';
     const listHtml = Object.entries(clips).map(([id, c]) => {
       const { bars } = _clipKeysForBars(c, selectedBars);
-      const note = bars !== selectedBars ? ` (${bars}마디로 대체)` : '';
+      const note = bars !== selectedBars ? ` (${barsLabel(bars)}로 대체)` : '';
       return `<div class="tl-perf-menu-item" data-id="${id}" data-bars="${bars}" title="${c.desc || ''}">
-                <span>${c.name}${note}</span><span class="tl-perf-menu-bars">${bars}마디</span>
+                <span>${c.name}${note}</span><span class="tl-perf-menu-bars">${barsLabel(bars)}</span>
               </div>`;
     }).join('');
     menu.innerHTML = filterHtml + listHtml
@@ -5251,7 +5252,7 @@ function _showPerfClipMenu(x, y, onPick) {
   menu.addEventListener('click', e => {
     const filterItem = e.target.closest('.tl-perf-menu-filter-item');
     if (filterItem) {
-      selectedBars = _perfMenuLastBars = parseInt(filterItem.dataset.bars, 10) || 1;
+      selectedBars = _perfMenuLastBars = parseFloat(filterItem.dataset.bars) || 1;
       render();
       return;
     }
@@ -5260,7 +5261,7 @@ function _showPerfClipMenu(x, y, onPick) {
     if (item.classList.contains('tl-perf-menu-cancel')) { cleanup(); return; }
     if (item.dataset.id) {
       cleanup();
-      onPick(item.dataset.id, parseInt(item.dataset.bars, 10) || 1);
+      onPick(item.dataset.id, parseFloat(item.dataset.bars) || 1);
     }
   });
   // 지금 이 클릭 자체가 document에 버블링돼 바로 닫히지 않도록 한 틱 미룬다.
