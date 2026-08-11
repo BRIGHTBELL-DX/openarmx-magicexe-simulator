@@ -2244,15 +2244,23 @@ function buildKeyframes() {
       const clip = PERFORMANCE_CLIPS[e.presetId];
       const { bars, keys } = _clipKeysForBars(clip, e.bars);
       const start = parseFloat(((e.beat - 1) * beatDur).toFixed(3));
-      return { evt: e, clip, bars, keys, start, end: parseFloat((start + bars * beatsPerBar * beatDur).toFixed(3)) };
+      // 파워 레이즈처럼 한 팔만 쓰는 클립은 arms가 그 팔 하나뿐이다 — 다른
+      // 팔의 타격은 이 구간에 걸려도 무시하거나 체인을 끊으면 안 된다
+      // (사용자 지적: "왼팔이 파워 레이즈 들어가도 오른팔은 타임라인에
+      // 맞춰 타격해야지" — UI에서는 배치를 허용해놓고 실제 애니메이션
+      // 생성에서는 여전히 팔 구분 없이 걸러내던 게 진짜 버그였다).
+      const arms = _powerRaiseArms(e.presetId) || ['L', 'R'];
+      return { evt: e, clip, bars, keys, start, end: parseFloat((start + bars * beatsPerBar * beatDur).toFixed(3)), arms };
     });
   // 끝 경계는 살짝 열어둔다(EPS) — 구간 끝 시각과 그 박자의 타격 시각을
   // 각각 toFixed(3)로 반올림하다 보면 1ms 차이로 끝 박자의 타격이 "구간
   // 안"으로 판정돼 통째로 무시되는 일이 있었다(파워 레이즈 연계 타격이
   // 클립 끝에 딱 붙을 때 실제로 발생 — 소리는 나는데 팔은 안 움직임).
   const _PERF_EDGE_EPS = 0.005;
-  const _tInsidePerf = t => perfSpans.some(sp => t >= sp.start && t < sp.end - _PERF_EDGE_EPS);
-  const _perfBetween = (tA, tB) => perfSpans.some(sp => sp.start >= tA && sp.start < tB);
+  const _tInsidePerf = (t, arm) => perfSpans.some(sp =>
+    t >= sp.start && t < sp.end - _PERF_EDGE_EPS && sp.arms.includes(arm));
+  const _perfBetween = (tA, tB, arm) => perfSpans.some(sp =>
+    sp.start >= tA && sp.start < tB && sp.arms.includes(arm));
 
   /** 퍼포먼스 span → { L?: 잘라낼 시각, R?: ... } — 그 시각 이후의 클립
    *  키프레임은 주입하지 않는다(타격을 향해 내려오는 구간이 덮이지 않게). */
@@ -2268,7 +2276,7 @@ function buildKeyframes() {
     const effArm = evt.arm ?? rawDrum.arm;
     const drum   = effArm === rawDrum.arm ? rawDrum : { ...rawDrum, arm: effArm };
     const t = parseFloat(((evt.beat - 1) * beatDur).toFixed(3));
-    if (_tInsidePerf(t)) return;   // 퍼포먼스 구간과 겹치는 타격은 무시
+    if (_tInsidePerf(t, effArm)) return;   // 그 팔을 쓰는 퍼포먼스 구간과 겹치는 타격은 무시
     armEvts[effArm].push({ drum, t, vel: evt.vel ?? 'medium' });
   });
   armEvts.L.sort((a, b) => a.t - b.t);
@@ -2309,7 +2317,7 @@ function buildKeyframes() {
       // 끊긴 것 — 이 타격은 (퍼포먼스가 끝난 뒤) 새로 raise부터 시작해야
       // 한다(hasPrev=false 취급).
       const prevEvt  = armEvts[arm][idx - 1];
-      const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t);
+      const hasPrev  = idx > 0 && !_perfBetween(prevEvt.t, t, arm);
       let raiseT     = parseFloat(Math.max(0.001, t - preDur).toFixed(3));
       const reboundT = parseFloat((t + typeInfo.rebDur).toFixed(3));
 
@@ -2317,7 +2325,7 @@ function buildKeyframes() {
       // 다음 타격과의 사이에 퍼포먼스 구간이 끼어 있으면 경유점(via-point)
       // 체인으로 잇지 않는다 — 이 타격이 (퍼포먼스 전) 마지막 타격인 것처럼
       // rebound 후 대기하다가 퍼포먼스로 넘어가야 한다.
-      const next = (rawNext && !_perfBetween(t, rawNext.t)) ? rawNext : null;
+      const next = (rawNext && !_perfBetween(t, rawNext.t, arm)) ? rawNext : null;
 
       // 다음 타격이 있으면 rebound 생략 — rebound가 현재 드럼 바로 위로 팔을 들어
       // strike → rebound → via-point 순서가 되면 ㄷ자 경로가 됨.
@@ -2338,7 +2346,7 @@ function buildKeyframes() {
         // 인식되지 않고, 그러면 연계(최고점→타격) 분기를 못 타서 팔이
         // 대기 자세에 있다가 타격만 툭 나오는 문제가 있었다(실측 확인).
         const precedingPerfSpan = perfSpans
-          .filter(sp => sp.end <= t + _PERF_EDGE_EPS)
+          .filter(sp => sp.end <= t + _PERF_EDGE_EPS && sp.arms.includes(arm))
           .reduce((best, sp) => (!best || sp.end > best.end) ? sp : best, null);
         const precedingPerfEnd = precedingPerfSpan ? Math.min(precedingPerfSpan.end, t) : 0;
 
@@ -2421,7 +2429,7 @@ function buildKeyframes() {
       // 타격 대기(else 분기)의 holdEndT 계산도 이 클램프된 값을 그대로
       // 이어받아야 rebound보다 이른 holdEndT가 나오는 걸 막는다.
       const followingPerfStart = perfSpans
-        .filter(sp => sp.start >= t)
+        .filter(sp => sp.start >= t && sp.arms.includes(arm))
         .reduce((min, sp) => Math.min(min, sp.start), Infinity);
       const effectiveReboundT = parseFloat(Math.min(reboundT, followingPerfStart - 0.001).toFixed(3));
       if (includeRebound && effectiveReboundT > t) {
@@ -2624,12 +2632,20 @@ function buildKeyframes() {
 
   // ── 퍼포먼스 클립 자체의 키프레임 주입 ────────────────────────
   // 퍼포먼스는 IK로 드럼을 겨냥하는 게 아니라 양팔 포즈를 직접 지정하는
-  // 연출 동작이라, clip.keys(0~1 정규화 시각)를 절대 시간으로 바꿔 L/R
-  // 양쪽 poseMap에 그대로 찍는다. 위에서 이미 hasPrev/next 계산 시 이
-  // 구간을 피해가도록(perfSpans) 타격 체인을 끊어뒀으므로, 여기서 찍는
-  // 포즈와 타격 경유점이 같은 시간대에 겹칠 일은 없다.
+  // 연출 동작이라, clip.keys(0~1 정규화 시각)를 절대 시간으로 바꿔 poseMap에
+  // 그대로 찍는다. 위에서 이미 hasPrev/next 계산 시 이 구간을 피해가도록
+  // (perfSpans) 타격 체인을 끊어뒀으므로, 그 팔은 여기서 찍는 포즈와 겹칠
+  // 일이 없다.
+  // ⚠ 파워 레이즈처럼 한 팔만 쓰는 클립(sp.arms가 그 팔 하나뿐)은 안 쓰는
+  // 팔 쪽은 절대 주입하지 않는다 — 예전엔 양팔 다 찍었는데, power_raise_l의
+  // keys 배열에 R쪽 값이 "PERF_READY로 고정"으로 들어있어서, 그 구간에
+  // 오른팔이 실제로 타격해도 이 주입이 매 프레임 R을 다시 ready로 끌어당겨
+  // 타격 모션이 눌려버렸다(사용자 지적: "마스크만 막혀 있지 실제 시뮬레이션
+  // 보면 타격을 진행하지 않는다, 배치만 되는 거다" — 정확했다. UI 배치는
+  // 이미 고쳐졌지만 키프레임 생성에서 여전히 팔 구분 없이 두 팔 다 눌러
+  // 찍고 있었던 게 진짜 원인).
   perfSpans.forEach((sp) => {
-    const { bars, keys, start } = sp;
+    const { bars, keys, start, arms } = sp;
     const duration = bars * beatsPerBar * beatDur;
     if (!Array.isArray(keys) || !keys.length || duration <= 0) return;
     // 이 클립 끝 박자에 타격이 붙어 있으면(파워 레이즈 연계) 그 팔은
@@ -2638,10 +2654,14 @@ function buildKeyframes() {
     const cut = perfTailCut.get(sp) || {};
     keys.slice().sort((a, b) => a.at - b.at).forEach(k => {
       const time = parseFloat((start + duration * Math.min(1, Math.max(0, k.at))).toFixed(3));
-      const lPose = {}; L_KEYS.forEach((key, i) => { lPose[key] = k.pose[i] ?? 0; });
-      const rPose = {}; R_KEYS.forEach((key, i) => { rPose[key] = k.pose[7 + i] ?? 0; });
-      if (cut.L === undefined || time <= cut.L + 0.0005) addPose(L_poseMap, time, lPose, L_KEYS);
-      if (cut.R === undefined || time <= cut.R + 0.0005) addPose(R_poseMap, time, rPose, R_KEYS);
+      if (arms.includes('L') && (cut.L === undefined || time <= cut.L + 0.0005)) {
+        const lPose = {}; L_KEYS.forEach((key, i) => { lPose[key] = k.pose[i] ?? 0; });
+        addPose(L_poseMap, time, lPose, L_KEYS);
+      }
+      if (arms.includes('R') && (cut.R === undefined || time <= cut.R + 0.0005)) {
+        const rPose = {}; R_KEYS.forEach((key, i) => { rPose[key] = k.pose[7 + i] ?? 0; });
+        addPose(R_poseMap, time, rPose, R_KEYS);
+      }
     });
   });
 
