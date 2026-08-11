@@ -3027,7 +3027,7 @@ window.validatePattern = function () {
     if (!rawDrum || rawDrum.type === 'kick') return;
     const effArm = evt.arm ?? rawDrum.arm;
     const drum   = effArm === rawDrum.arm ? rawDrum : { ...rawDrum, arm: effArm };
-    armEvts[effArm].push({ t: (evt.beat - 1) * beatDur, drum });
+    armEvts[effArm].push({ t: (evt.beat - 1) * beatDur, beat: evt.beat, drum });
   });
   const introOff = _getAudioTimeOffset();
   ['L','R'].forEach(arm => {
@@ -3039,6 +3039,13 @@ window.validatePattern = function () {
     for (let i = 1; i < evts.length; i++) {
       const gap = evts[i].t - evts[i - 1].t;
       const jumpT = evts[i].t + introOff;
+      // 두 타격의 DOM 키 — 간격이 너무 좁으면(예: 55ms ≈ 화면상 3~4px)
+      // 재생헤드만 옮겨서는 두 점이 겹쳐 보여 "문제가 안 보인다"는 혼란이
+      // 있었다(사용자 지적) — 두 타격점 자체를 강조해서 직접 보여준다.
+      const pairKeys = [
+        `${evts[i-1].drum.id}_${evts[i-1].beat}_${arm}`,
+        `${evts[i].drum.id}_${evts[i].beat}_${arm}`,
+      ];
       if (gap < 0.055) {
         // 반대팔로 두 번째 드럼을 칠 수 있는지 체크
         const d2       = evts[i].drum;
@@ -3052,10 +3059,10 @@ window.validatePattern = function () {
             ? ` (${otherKr}도 해당 타이밍에 사용 중)`
             : ` (${otherKr}도 도달 불가 ${distAlt.toFixed(2)}m)`;
         _valPush(results, 'err',
-          `${armKr} 연속 타격 간격 너무 짧음 (${(gap*1000).toFixed(0)}ms)${altHint}`, { type:'time', t: jumpT });
+          `${armKr} 연속 타격 간격 너무 짧음 (${(gap*1000).toFixed(0)}ms)${altHint}`, { type:'time', t: jumpT, keys: pairKeys });
       } else if (gap < 0.12) {
         _valPush(results, 'warn',
-          `${armKr} 고속 타격 (${(gap*1000).toFixed(0)}ms) — 확인 필요`, { type:'time', t: jumpT });
+          `${armKr} 고속 타격 (${(gap*1000).toFixed(0)}ms) — 확인 필요`, { type:'time', t: jumpT, keys: pairKeys });
       }
     }
   });
@@ -3162,6 +3169,17 @@ window._valJump = function (idx) {
       const x = parseFloat(ph.style.left) || 0;
       const viewW = scrollEl.clientWidth;
       scrollEl.scrollLeft = clamp(x - viewW / 2, 0, Math.max(0, scrollEl.scrollWidth - viewW));
+    }
+    // 간격이 좁은 두 타격점(예: 55ms ≈ 화면상 3~4px)은 재생헤드만 옮기면
+    // 겹쳐 보여 "문제가 안 보인다"는 혼란이 있었다(사용자 지적) — 두
+    // 점을 직접 찾아 잠깐 반짝여서 정확히 어느 두 점인지 보여준다.
+    if (item.jump.keys?.length) {
+      item.jump.keys.forEach(key => {
+        document.querySelectorAll(`.tl-hit[data-key="${key}"]`).forEach(hit => {
+          hit.classList.add('val-hit-highlight');
+          setTimeout(() => hit.classList.remove('val-hit-highlight'), 2500);
+        });
+      });
     }
   } else if (item.jump.type === 'drum') {
     document.getElementById('drum-panel')?.classList.remove('collapsed');

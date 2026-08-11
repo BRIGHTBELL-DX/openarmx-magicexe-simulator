@@ -894,6 +894,19 @@ body {
   100%     { background: transparent; }
 }
 
+/* 이동 클릭 후 타임라인 위의 타격점 자체를 강조 — 간격이 너무 좁은
+   두 점(예: 55ms ≈ 화면상 3~4px)은 재생헤드만 옮기면 겹쳐 보여서 "뭐가
+   문제인지 안 보인다"는 지적이 있었다. 링을 키워서 겹쳐 있어도 두 점의
+   경계가 뚜렷이 보이게 한다. */
+.tl-hit.val-hit-highlight {
+  animation: valHitHighlight 2.5s ease-out;
+  z-index: 20;
+}
+@keyframes valHitHighlight {
+  0%, 55%  { box-shadow: 0 0 0 5px rgba(255,90,90,0.9), 0 0 14px 6px rgba(255,90,90,0.6); transform: translateX(-50%) scale(1.6); }
+  100%     { box-shadow: 0 0 0 0 rgba(255,90,90,0); transform: translateX(-50%) scale(1); }
+}
+
 /* ── 오디오 버튼 ── */
 .audio-label {
   background: #1a1a40;
