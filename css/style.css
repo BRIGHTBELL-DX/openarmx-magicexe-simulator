@@ -686,6 +686,12 @@ body {
 /* 파워 레이즈 타격 드럼 선택 시 그 팔로 도달 불가한 드럼 표시 */
 .tl-perf-menu-item-unreach { opacity: 0.5; }
 .tl-perf-menu-item-unreach .tl-perf-menu-bars { color: #cc5544; }
+/* 이 마디 수로는 대기→타격까지 시간이 물리적으로 부족한 드럼 — 도달
+   불가와는 다른 이유라 따로 표시하고, 클릭도 안 먹게 막는다(그 대신
+   슬쩍 다음 박으로 넘기지 않기 위해 — 사용자 지적: "반박 하면 반박
+   안에 타격까지 해결되어야 하는 게 맞지"). */
+.tl-perf-menu-item-disabled { opacity: 0.35; cursor: not-allowed; }
+.tl-perf-menu-item-disabled .tl-perf-menu-bars { color: #886633; }
 .tl-perf-menu-cancel { color: #999; justify-content: center; margin-top: 2px; border-top: 1px solid #2a2a44; }
 /* 마디 수 필터 — 클립 목록 위에 고정, 클릭해도 패널 전환 없이 목록만 갱신 */
 .tl-perf-menu-filter {

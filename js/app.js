@@ -5372,7 +5372,30 @@ function _powerRaiseArms(presetId) {
 
 /** 파워 레이즈 직후 타격할 드럼 선택 메뉴 — 그 팔로 실제 도달 가능한지
  *  (_armReachOk) 표시해준다. onPick(drumId | null) — null이면 타격 없이 진행. */
-function _showStrikeDrumMenu(x, y, arm, onPick) {
+/** 이 클립·마디 수·팔·드럼 조합이 "그 마디 수 안에서(확장 없이)" 끝나는지 —
+ *  _placePerfClip의 endBeat 계산과 같은 식을 그대로 쓴다. 반마디처럼 짧은
+ *  마디 수에서는 드럼마다 물리적으로 불가능한 경우가 실제로 있다(그 드럼
+ *  자체의 대기→raise 거리가 이미 그 시간보다 크면 진폭을 0으로 낮춰도
+ *  안 됨) — 사용자 지적: "반박 하면 반박 안에 타격까지 해결되어야 하는
+ *  게 맞지"(몰래 다음 박으로 넘기지 말라는 뜻). 그래서 애초에 메뉴에서
+ *  고를 수 없게 막는다. */
+function _perfFitsNoExtension(presetId, bars, arm, drumId) {
+  const d = drumKit.find(dd => dd.id === drumId);
+  if (!d) return true;
+  const beatDur = 60 / bpm;
+  const peak = _perfClipFinalPose(presetId, bars, arm);
+  if (!peak) return true;   // 파워 레이즈 계열이 아니면 이 체크 대상 아님
+  const ed = arm === d.arm ? d : { ...d, arm };
+  const need = _perfHandoffDur(peak,
+    computeStrikePose(ed, 'raise',  'hard'),
+    computeStrikePose(ed, 'strike', 'hard'), arm,
+    _clipVelBudget(presetId)).total;
+  const tailAt = _perfClipTailStartAt(presetId, bars, arm);
+  const inClip = bars * beatsPerBar * beatDur * (1 - tailAt);
+  return need <= inClip + 1e-6;
+}
+
+function _showStrikeDrumMenu(x, y, arm, onPick, presetId, bars) {
   document.querySelectorAll('.tl-perf-menu').forEach(m => m.remove());
   const menu = document.createElement('div');
   menu.className = 'tl-perf-menu';
@@ -5381,6 +5404,13 @@ function _showStrikeDrumMenu(x, y, arm, onPick) {
   const armKr = arm === 'L' ? '왼팔' : '오른팔';
   const items = drumKit.filter(d => d.type !== 'kick').map(d => {
     const ok = _armReachOk(d, arm);
+    const fitsTime = !ok || _perfFitsNoExtension(presetId, bars, arm, d.id);
+    if (!fitsTime) {
+      return `<div class="tl-perf-menu-item tl-perf-menu-item-disabled" data-drum=""
+                   title="이 마디 수로는 대기 자세→타격까지 시간이 부족합니다 — 마디 수를 늘리거나 다른 드럼을 고르세요">
+                <span>${d.name}</span><span class="tl-perf-menu-bars">시간 부족</span>
+              </div>`;
+    }
     return `<div class="tl-perf-menu-item${ok ? '' : ' tl-perf-menu-item-unreach'}" data-drum="${d.id}"
                  title="${ok ? '' : `${armKr}로는 도달 불가 — 드럼 위치를 옮기거나 다른 드럼을 고르세요`}">
               <span>${d.name}</span><span class="tl-perf-menu-bars">${ok ? '' : '도달 불가'}</span>
@@ -5410,6 +5440,7 @@ function _showStrikeDrumMenu(x, y, arm, onPick) {
   menu.addEventListener('click', e => {
     const item = e.target.closest('.tl-perf-menu-item');
     if (!item || done) return;
+    if (item.classList.contains('tl-perf-menu-item-disabled')) return;   // 시간 부족 — 선택 불가
     done = true;
     cleanup();
     onPick(item.classList.contains('tl-perf-menu-cancel') ? null : (item.dataset.drum || null));
@@ -5491,10 +5522,12 @@ function _placePerfClip(x, y, beat, presetId, pickedBars) {
   };
   const askNext = (i) => {
     if (i >= arms.length) { finish(); return; }
+    // presetId/pickedBars까지 넘겨서, 이 마디 수로는 시간이 부족한 드럼은
+    // 메뉴에서부터 고를 수 없게 막는다(_perfFitsNoExtension).
     _showStrikeDrumMenu(x, y, arms[i], (drumId) => {
       if (drumId) picks.push({ arm: arms[i], drumId });
       askNext(i + 1);
-    });
+    }, presetId, pickedBars);
   };
   askNext(0);
 }
