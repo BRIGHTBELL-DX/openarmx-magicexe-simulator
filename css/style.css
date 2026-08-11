@@ -723,6 +723,10 @@ body {
   transform: translateX(-50%);
   transition: filter .08s, transform .08s;
   z-index: 5;
+  /* 항상 어두운 1px 테두리로 옆 점과 경계를 갈라둔다 — 이게 없으면
+     같은 색 드럼이 붙어 있을 때(예: "강" 하나와 "중" 두 개가 인접) 서로
+     녹아 붙어 몇 개인지 구분이 안 된다(사용자 지적). */
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.65);
 }
 .tl-hit:hover { filter: brightness(1.5); transform: translateX(-50%) scaleY(1.1); }
 .tl-hit.flash { filter: brightness(3) !important; transform: translateX(-50%) scale(1.3) !important; }
@@ -730,10 +734,17 @@ body {
 .tl-hit.arm-L    { top: 2px; height: 14px; }
 .tl-hit.arm-R    { bottom: 2px; height: 14px; }
 .tl-hit.arm-none { top: 3px; bottom: 3px; }
-/* velocity → 폭(가로)만 담당 */
+/* velocity → 폭(가로) + 테두리 밝기로 이중 구분한다. 예전엔 폭만 달라서
+   "강" 하나(14px)와 "중" 두 개가 붙어 있는 경우가 비슷한 너비로 보여
+   구분이 안 된다는 지적이 있었다 — 이제 "강"만 밝은 흰 테두리 + 옅은
+   발광으로 눈에 띄게 해서, 폭이 비슷해도 "강 1개"인지 "중 여러 개"인지
+   윤곽선 개수로 바로 셀 수 있다. */
 .tl-hit.vel-soft   { width: 7px;  opacity: 0.60; }
 .tl-hit.vel-medium { width: 10px; }
-.tl-hit.vel-hard   { width: 14px; }
+.tl-hit.vel-hard   {
+  width: 14px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.9), 0 0 4px 1px rgba(255,255,255,0.35);
+}
 
 /* 비트 더블클릭 시 뜨는 L/R 팔 변경 드롭다운 */
 .tl-arm-dropdown {
@@ -897,14 +908,19 @@ body {
 /* 이동 클릭 후 타임라인 위의 타격점 자체를 강조 — 간격이 너무 좁은
    두 점(예: 55ms ≈ 화면상 3~4px)은 재생헤드만 옮기면 겹쳐 보여서 "뭐가
    문제인지 안 보인다"는 지적이 있었다. 링을 키워서 겹쳐 있어도 두 점의
-   경계가 뚜렷이 보이게 한다. */
+   경계가 뚜렷이 보이게 한다.
+   ⚠ 처음엔 빨간 링(rgba(255,90,90,...))을 썼는데, 재생헤드(#tl-playhead)
+   가 거의 같은 빨강(rgba(255,60,60,...))이라 두 점이 재생헤드 선과
+   뒤섞여 오히려 더 안 보였다(사용자 지적: "겹치는 게 인지가 안 된다").
+   재생헤드·타격 색(강조는 보통 빨강 계열) 어느 쪽과도 안 겹치는 노란/
+   금색으로 바꾼다. */
 .tl-hit.val-hit-highlight {
   animation: valHitHighlight 2.5s ease-out;
-  z-index: 20;
+  z-index: 25;
 }
 @keyframes valHitHighlight {
-  0%, 55%  { box-shadow: 0 0 0 5px rgba(255,90,90,0.9), 0 0 14px 6px rgba(255,90,90,0.6); transform: translateX(-50%) scale(1.6); }
-  100%     { box-shadow: 0 0 0 0 rgba(255,90,90,0); transform: translateX(-50%) scale(1); }
+  0%, 55%  { box-shadow: 0 0 0 5px rgba(255,214,0,0.95), 0 0 16px 7px rgba(255,214,0,0.65); transform: translateX(-50%) scale(1.7); }
+  100%     { box-shadow: 0 0 0 0 rgba(255,214,0,0); transform: translateX(-50%) scale(1); }
 }
 
 /* ── 오디오 버튼 ── */

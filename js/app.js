@@ -3046,6 +3046,7 @@ window.validatePattern = function () {
         `${evts[i-1].drum.id}_${evts[i-1].beat}_${arm}`,
         `${evts[i].drum.id}_${evts[i].beat}_${arm}`,
       ];
+      const pairInfo = `beat ${evts[i-1].beat.toFixed(2)}(${evts[i-1].drum.name}) ↔ ${evts[i].beat.toFixed(2)}(${evts[i].drum.name})`;
       if (gap < 0.055) {
         // 반대팔로 두 번째 드럼을 칠 수 있는지 체크
         const d2       = evts[i].drum;
@@ -3059,10 +3060,10 @@ window.validatePattern = function () {
             ? ` (${otherKr}도 해당 타이밍에 사용 중)`
             : ` (${otherKr}도 도달 불가 ${distAlt.toFixed(2)}m)`;
         _valPush(results, 'err',
-          `${armKr} 연속 타격 간격 너무 짧음 (${(gap*1000).toFixed(0)}ms)${altHint}`, { type:'time', t: jumpT, keys: pairKeys });
+          `${armKr} 연속 타격 간격 너무 짧음 (${(gap*1000).toFixed(0)}ms)${altHint}`, { type:'time', t: jumpT, keys: pairKeys, info: pairInfo });
       } else if (gap < 0.12) {
         _valPush(results, 'warn',
-          `${armKr} 고속 타격 (${(gap*1000).toFixed(0)}ms) — 확인 필요`, { type:'time', t: jumpT, keys: pairKeys });
+          `${armKr} 고속 타격 (${(gap*1000).toFixed(0)}ms) — 확인 필요`, { type:'time', t: jumpT, keys: pairKeys, info: pairInfo });
       }
     }
   });
@@ -3180,6 +3181,9 @@ window._valJump = function (idx) {
           setTimeout(() => hit.classList.remove('val-hit-highlight'), 2500);
         });
       });
+      // 두 점이 화면상 몇 px 안 되게 붙어 있으면 색만으로는 부족할 수
+      // 있어 정확한 박자 값도 상태줄에 텍스트로 남긴다.
+      if (item.jump.info) setStatus(`⚡ 노란 링 두 개가 충돌 지점 — ${item.jump.info}`);
     }
   } else if (item.jump.type === 'drum') {
     document.getElementById('drum-panel')?.classList.remove('collapsed');
