@@ -771,7 +771,7 @@ body {
   background: #0d0d22;
   border: 1px solid #2a3060;
   border-radius: 8px;
-  width: 460px;
+  width: 520px;
   max-height: 72vh;
   display: flex;
   flex-direction: column;
@@ -801,12 +801,98 @@ body {
   overflow-y: auto;
   flex: 1;
   font-size: 12px;
-  line-height: 2;
 }
-.val-ok   { color: #50cc70; }
-.val-warn { color: #e0a030; }
-.val-err  { color: #e04848; }
-.val-info { color: #6688aa; }
+
+/* 상단 요약 배지 — "심각 N · 주의 N · 정상 N"을 한눈에. 사용자 피드백:
+   "직관적이지도 않고 뭐가 문제인지 인지도 안 된다" — 통과 항목과 문제
+   항목이 뒤섞여 있던 게 원인이라, 여기서부터 심각도를 바로 보여준다. */
+.val-summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.val-badge {
+  flex: 1;
+  text-align: center;
+  padding: 8px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.val-badge-err  { background: rgba(224,72,72,0.15);  color: #ff8080; }
+.val-badge-warn { background: rgba(224,160,48,0.15); color: #ffc060; }
+.val-badge-ok   { background: rgba(80,204,112,0.15); color: #6fe090; }
+.val-badge-zero { opacity: 0.35; }
+
+.val-clean {
+  color: #6fe090;
+  background: rgba(80,204,112,0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* 심각도별 접이식 그룹 */
+.val-section { margin-bottom: 8px; border-radius: 8px; overflow: hidden; }
+.val-section summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-weight: 700;
+  font-size: 12px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.val-section summary::-webkit-details-marker { display: none; }
+.val-section-err  summary { background: rgba(224,72,72,0.12);  color: #ff9090; }
+.val-section-warn summary { background: rgba(224,160,48,0.12); color: #ffc868; }
+.val-section-ok   summary { background: rgba(255,255,255,0.04); color: #8899bb; }
+.val-count {
+  margin-left: auto;
+  background: rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 11px;
+}
+.val-section-body { padding: 4px 0; }
+
+.val-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  line-height: 1.5;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.val-row:last-child { border-bottom: none; }
+.val-row-msg { flex: 1; }
+.val-row-err  .val-row-msg { color: #f09090; }
+.val-row-warn .val-row-msg { color: #f0c070; }
+.val-row-ok   .val-row-msg { color: #8fa8c0; }
+
+.val-jump-btn {
+  flex-shrink: 0;
+  background: rgba(110,140,255,0.15);
+  border: 1px solid rgba(110,140,255,0.35);
+  color: #a8bcff;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.val-jump-btn:hover { background: rgba(110,140,255,0.28); }
+
+/* 이동 클릭 후 대상 드럼 행을 잠깐 강조 */
+.val-row-flash { animation: valRowFlash 1.5s ease-out; }
+@keyframes valRowFlash {
+  0%, 40%  { background: rgba(110,140,255,0.35); }
+  100%     { background: transparent; }
+}
 
 /* ── 오디오 버튼 ── */
 .audio-label {

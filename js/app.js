@@ -2985,26 +2985,41 @@ window.exportAudio = async function () {
 // ═══════════════════════════════════════════════════════════════
 //  검증
 // ═══════════════════════════════════════════════════════════════
+// 검증 결과를 매번 여기 저장해뒀다가, 항목의 "이동" 클릭 시 인덱스로
+// 다시 꺼내 쓴다(_valJump). innerHTML을 통째로 새로 그리므로 인라인
+// onclick에 안전하게 넘길 수 있는 게 인덱스뿐이라 이 방식을 쓴다.
+let _valResults = [];
+
+/** 사람이 한눈에 읽을 항목 하나. jump가 있으면 "이동" 버튼이 붙는다.
+ *  jump: {type:'time', t} — 타임라인·3D를 그 시각으로 이동
+ *        {type:'drum', drumId} — 드럼 키트 패널에서 그 드럼을 강조 */
+function _valPush(results, lv, msg, jump) {
+  results.push({ lv, msg, jump });
+}
+
 window.validatePattern = function () {
   const results  = [];
   const beatDur  = 60 / bpm;
 
-  results.push({ lv:'info', msg:`BPM ${bpm} · ${totalBars}마디 · ${beatsPerBar}/4박자` });
-  results.push({ lv:'info', msg:`타임라인 이벤트 ${timelineEvents.length}개` });
-
+  // ── 1. 드럼 배치 (도달성) ────────────────────────────────────
   drumKit.forEach(d => {
-    if (d.type === 'kick') { results.push({ lv:'info', msg:`[${d.name}] 킥 — 확장 이벤트 (팔 동작 없음)` }); return; }
+    if (d.type === 'kick') return;   // 팔 동작이 없어 도달성 체크 대상 아님
     const dist = reachDist(d);
-    if      (!_armReachOk(d, d.arm))    results.push({ lv:'err',  msg:`[${d.name}] 도달 불가 (${dist.toFixed(2)}m — 거리 또는 반대편 위치)` });
-    else if (dist > STICK_REACH * 0.88) results.push({ lv:'warn', msg:`[${d.name}] 한계 근접 (${dist.toFixed(2)}m)` });
-    else                              results.push({ lv:'ok',   msg:`[${d.name}] 도달 가능 (${dist.toFixed(2)}m)` });
+    if (!_armReachOk(d, d.arm)) {
+      _valPush(results, 'err', `[${d.name}] 도달 불가 (${dist.toFixed(2)}m — 거리 또는 반대편 위치)`, { type:'drum', drumId:d.id });
+    } else if (dist > STICK_REACH * 0.88) {
+      _valPush(results, 'warn', `[${d.name}] 한계 근접 (${dist.toFixed(2)}m)`, { type:'drum', drumId:d.id });
+    } else {
+      _valPush(results, 'ok', `[${d.name}] 도달 가능 (${dist.toFixed(2)}m)`, { type:'drum', drumId:d.id });
+    }
   });
 
   if (!drumKit.some(d => d.arm === 'L' && d.type !== 'kick'))
-    results.push({ lv:'warn', msg:'왼팔에 드럼이 없습니다.' });
+    _valPush(results, 'warn', '왼팔에 드럼이 없습니다.');
   if (!drumKit.some(d => d.arm === 'R' && d.type !== 'kick'))
-    results.push({ lv:'warn', msg:'오른팔에 드럼이 없습니다.' });
+    _valPush(results, 'warn', '오른팔에 드럼이 없습니다.');
 
+  // ── 2. 타이밍 (연속 타격 간격) ────────────────────────────────
   // 팔별 이벤트 목록 (시간순) — evt.arm 오버라이드 반영
   const armEvts = { L:[], R:[] };
   timelineEvents.forEach(evt => {
@@ -3014,6 +3029,7 @@ window.validatePattern = function () {
     const drum   = effArm === rawDrum.arm ? rawDrum : { ...rawDrum, arm: effArm };
     armEvts[effArm].push({ t: (evt.beat - 1) * beatDur, drum });
   });
+  const introOff = _getAudioTimeOffset();
   ['L','R'].forEach(arm => {
     const evts     = armEvts[arm].sort((a, b) => a.t - b.t);
     const otherArm = arm === 'L' ? 'R' : 'L';
@@ -3022,12 +3038,12 @@ window.validatePattern = function () {
 
     for (let i = 1; i < evts.length; i++) {
       const gap = evts[i].t - evts[i - 1].t;
+      const jumpT = evts[i].t + introOff;
       if (gap < 0.055) {
         // 반대팔로 두 번째 드럼을 칠 수 있는지 체크
         const d2       = evts[i].drum;
         const distAlt  = reachDist({ ...d2, arm: otherArm });
         const canAlt   = _armReachOk(d2, otherArm);
-        // 해당 타이밍에 반대팔이 이미 쓰이는지
         const beatSec  = evts[i].t;
         const otherBusy = armEvts[otherArm].some(e => Math.abs(e.t - beatSec) < 0.01);
         const altHint  = canAlt && !otherBusy
@@ -3035,27 +3051,26 @@ window.validatePattern = function () {
           : canAlt && otherBusy
             ? ` (${otherKr}도 해당 타이밍에 사용 중)`
             : ` (${otherKr}도 도달 불가 ${distAlt.toFixed(2)}m)`;
-        results.push({ lv:'err',
-          msg:`${armKr} 연속 타격 간격 너무 짧음 (${(gap*1000).toFixed(0)}ms)${altHint}` });
+        _valPush(results, 'err',
+          `${armKr} 연속 타격 간격 너무 짧음 (${(gap*1000).toFixed(0)}ms)${altHint}`, { type:'time', t: jumpT });
       } else if (gap < 0.12) {
-        results.push({ lv:'warn',
-          msg:`${armKr} 고속 타격 (${(gap*1000).toFixed(0)}ms) — 확인 필요` });
+        _valPush(results, 'warn',
+          `${armKr} 고속 타격 (${(gap*1000).toFixed(0)}ms) — 확인 필요`, { type:'time', t: jumpT });
       }
     }
   });
 
-  if (bpm > 180) results.push({ lv:'warn', msg:`BPM ${bpm}: 고속 연주 — 로봇 구동 한계를 확인하세요.` });
+  if (bpm > 180) _valPush(results, 'warn', `BPM ${bpm}: 고속 연주 — 로봇 구동 한계를 확인하세요.`);
 
+  // ── 3. 최종 궤적 데이터 ──────────────────────────────────────
   const kfs       = buildFinalFlatTimeline();   // 인트로/아웃트로 포함
   const shortKeys = ['L1','L2','L3','L4','L5','L6','L7','R1','R2','R3','R4','R5','R6','R7'];
   let yamlOk = true;
   kfs.forEach(kf => { shortKeys.forEach(k => { if (!isFinite(kf.angles[k])) yamlOk = false; }); });
-  results.push(yamlOk
-    ? { lv:'ok',  msg:`최종 YAML: ${kfs.length}개 포인트 (positions + velocities + accelerations) ✓` }
-    : { lv:'err', msg:'YAML에 유효하지 않은 값이 있습니다.' }
-  );
+  _valPush(results, yamlOk ? 'ok' : 'err',
+    yamlOk ? `최종 YAML: ${kfs.length}개 포인트 (positions + velocities + accelerations) ✓`
+           : 'YAML에 유효하지 않은 값이 있습니다.');
 
-  // ── 키프레임 밀도 체크 ──────────────────────────────────────
   // ROS2 컨트롤러 처리 가능 최소 간격 기준
   let densityErrCnt = 0, densityWarnCnt = 0;
   for (let i = 1; i < kfs.length; i++) {
@@ -3063,22 +3078,100 @@ window.validatePattern = function () {
     const ms  = (gap * 1000).toFixed(0);
     if (gap < 0.025) {
       densityErrCnt++;
-      results.push({ lv:'err',  msg:`키프레임 간격 ${ms}ms (t=${kfs[i].time.toFixed(3)}s) — 컨트롤러 처리 불가 (최소 25ms)` });
+      _valPush(results, 'err', `키프레임 간격 ${ms}ms (t=${kfs[i].time.toFixed(3)}s) — 컨트롤러 처리 불가 (최소 25ms)`, { type:'time', t: kfs[i].time });
     } else if (gap < 0.055) {
       densityWarnCnt++;
       if (densityWarnCnt <= 3)  // 경고 최대 3개만 표시
-        results.push({ lv:'warn', msg:`키프레임 간격 ${ms}ms (t=${kfs[i].time.toFixed(3)}s) — 고속 구간, 확인 권장` });
+        _valPush(results, 'warn', `키프레임 간격 ${ms}ms (t=${kfs[i].time.toFixed(3)}s) — 고속 구간, 확인 권장`, { type:'time', t: kfs[i].time });
     }
   }
   if (densityWarnCnt > 3)
-    results.push({ lv:'warn', msg:`외 ${densityWarnCnt - 3}개 고속 구간 더 있음` });
+    _valPush(results, 'warn', `외 ${densityWarnCnt - 3}개 고속 구간 더 있음`);
   if (densityErrCnt === 0 && densityWarnCnt === 0)
-    results.push({ lv:'ok', msg:'모든 키프레임 간격 정상 (≥ 55ms)' });
+    _valPush(results, 'ok', '모든 키프레임 간격 정상 (≥ 55ms)');
 
-  const iconMap = { ok:'✓', warn:'⚠', err:'✗', info:'ℹ' };
+  _valPush(results, 'info', `BPM ${bpm} · ${totalBars}마디 · ${beatsPerBar}/4박자 · 이벤트 ${timelineEvents.length}개`);
+
+  _renderValidation(results);
+};
+
+/** 심각도별로 그룹화해서 보여준다 — 심각(err)은 항상 펼쳐짐, 주의(warn)는
+ *  심각이 없을 때만 펼쳐짐, 정상/정보는 항상 접힌 채로 개수만 보여준다.
+ *  사용자 피드백: "직관적이지도 않고 뭐가 문제인지 인지도 안 된다" —
+ *  통과 항목이 문제 항목과 뒤섞여 있던 게 원인이라 심각도로 완전히
+ *  나누고, 각 항목에 실제 위치로 이동하는 버튼을 붙여 "읽는" 게 아니라
+ *  "고치러 가는" 화면으로 바꾼다. */
+function _renderValidation(results) {
+  _valResults = results;
+  const errs  = []; const warns = []; const oks = [];
+  results.forEach((r, i) => {
+    const withIdx = { ...r, idx: i };
+    if (r.lv === 'err') errs.push(withIdx);
+    else if (r.lv === 'warn') warns.push(withIdx);
+    else oks.push(withIdx);   // ok + info 통합(둘 다 "문제 아님")
+  });
+
+  const row = r => {
+    const jumpBtn = r.jump ? `<button class="val-jump-btn" onclick="event.stopPropagation();window._valJump(${r.idx})">이동 →</button>` : '';
+    return `<div class="val-row val-row-${r.lv}"><span class="val-row-msg">${r.msg}</span>${jumpBtn}</div>`;
+  };
+
+  const section = (label, icon, items, cls, openByDefault) => {
+    if (!items.length) return '';
+    return `<details class="val-section val-section-${cls}" ${openByDefault ? 'open' : ''}>
+      <summary>${icon} ${label} <span class="val-count">${items.length}</span></summary>
+      <div class="val-section-body">${items.map(row).join('')}</div>
+    </details>`;
+  };
+
+  const badge = (n, cls, label) => `<span class="val-badge val-badge-${cls}${n === 0 ? ' val-badge-zero' : ''}">${n} ${label}</span>`;
+
+  const summary = `<div class="val-summary">
+      ${badge(errs.length, 'err', '심각')}
+      ${badge(warns.length, 'warn', '주의')}
+      ${badge(oks.length, 'ok', '정상')}
+    </div>`;
+
+  const clean = !errs.length && !warns.length
+    ? `<div class="val-clean">✓ 재생을 막을 문제가 없습니다.</div>` : '';
+
   document.getElementById('validation-content').innerHTML =
-    results.map(r => `<div class="val-${r.lv}">${iconMap[r.lv]} ${r.msg}</div>`).join('');
+    summary + clean +
+    section('심각한 문제 — 이대로면 재생·실행이 안 됩니다', '🔴', errs, 'err', true) +
+    section('주의가 필요한 항목', '🟡', warns, 'warn', !errs.length) +
+    section('정상 / 정보', '⚪', oks, 'ok', false);
+
   document.getElementById('validation-modal').style.display = 'flex';
+}
+
+/** 검증 항목의 "이동" 클릭 — 시간 기반 항목은 타임라인·3D를 그 지점으로
+ *  스크럽하고 화면에 보이게 스크롤, 드럼 기반 항목은 드럼 키트 패널을 열어
+ *  그 드럼 행을 강조한다. */
+window._valJump = function (idx) {
+  const item = _valResults[idx];
+  if (!item || !item.jump) return;
+  window.closeValidation();
+  if (item.jump.type === 'time') {
+    const t = item.jump.t;
+    const scrubber = document.getElementById('scrubber');
+    if (scrubber) { scrubber.value = t; scrubber.dispatchEvent(new Event('input')); }
+    _updatePlayhead(t);
+    const ph = document.getElementById('tl-playhead');
+    const scrollEl = document.getElementById('tl-scroll');
+    if (ph && scrollEl) {
+      const x = parseFloat(ph.style.left) || 0;
+      const viewW = scrollEl.clientWidth;
+      scrollEl.scrollLeft = clamp(x - viewW / 2, 0, Math.max(0, scrollEl.scrollWidth - viewW));
+    }
+  } else if (item.jump.type === 'drum') {
+    document.getElementById('drum-panel')?.classList.remove('collapsed');
+    const row = document.querySelector(`.drum-row[data-id="${item.jump.drumId}"]`);
+    if (row) {
+      row.scrollIntoView({ behavior:'smooth', block:'center' });
+      row.classList.add('val-row-flash');
+      setTimeout(() => row.classList.remove('val-row-flash'), 1500);
+    }
+  }
 };
 
 window.closeValidation = function () {
