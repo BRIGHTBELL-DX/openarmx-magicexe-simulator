@@ -2543,6 +2543,19 @@ function buildKeyframes() {
         const sameDrum = next.drum.id === drum.id;
         const useNeutralHold = gap > IDLE_GAP_THRESHOLD && !sameDrum;
 
+        // 같은 드럼이 긴 간격을 두고 다시 온다면(예: 연타 후 쉬었다가 같은
+        // 하이햇을 다시 침) peak(연타 전용, J4 +0.45 추가 클리어런스)로
+        // 대기 전체를 채우면 팔이 필요 이상으로 높이 들린 채 계속 떠
+        // 있는 것처럼 보인다(사용자 지적: "대기 자세로 돌아가는 각도가
+        // 너무 비스듬하게 올라간다"). 이 클리어런스는 "빠른 연타 중
+        // 스틱이 드럼 표면을 스치지 않도록" 만든 것이라 시간이 넉넉한
+        // 대기 구간에는 필요 없다 — 같은 드럼이라 raise(A)==raise(B)이므로
+        // 그냥 raise 자세 그대로 대기하면 이미 다음 타격 자세에 도착해
+        // 있는 셈이라 추가 스냅 구간도 필요 없다. (짧은 간격의 연타는
+        // 여기 해당하지 않아 기존 peak 동작 그대로 유지된다 — 사용자가
+        // 이미 확인하고 유지하기로 한 부분.)
+        const sameDrumIdleHold = gap > IDLE_GAP_THRESHOLD && sameDrum;
+
         // 순수 중립(READY)으로 쉬다가 다음 드럼 쪽으로 스냅하면, 두 드럼의
         // raise 자세 차이가 큰 조합(예: 크래시→하이햇)에서 짧은 스냅 구간
         // 안에 관절이 크게 방향을 틀어야 해 "비스듬히 들어가는" 것처럼
@@ -2561,7 +2574,7 @@ function buildKeyframes() {
           return p;
         })() : null;
 
-        addPose(poseMap, peakT, useNeutralHold ? neutralHoldPose : peak, sideKeys);
+        addPose(poseMap, peakT, useNeutralHold ? neutralHoldPose : (sameDrumIdleHold ? posA : peak), sideKeys);
 
         // 피크 이후 다음 타격 직전까지 남는 시간 안에서 raise(B)를 한 번 더 찍는다.
         // 이렇게 하면 다른 드럼으로 넘어갈 때도 마지막 진입 구간만큼은 J1~J6 고정 +
@@ -2596,6 +2609,15 @@ function buildKeyframes() {
             if (midT > peakT && midT < snapT) addPose(poseMap, midT, neutralHoldPose, sideKeys);
             addBreathingHold(poseMap, neutralHoldPose, peakT, snapT, sideKeys);
             addPose(poseMap, snapT, neutralHoldPose, sideKeys);
+          }
+        } else if (sameDrumIdleHold) {
+          // raise(A)==raise(B)라 스냅 구간 없이 raise 자세 그대로 다음
+          // 타격 직전까지 숨쉬듯 대기한다 — 이미 도착해야 할 자세이므로
+          // "돌아왔다가 다시 그쪽으로 기운다"는 티가 전혀 나지 않는다.
+          const endT = parseFloat(Math.min(raiseBT, next.t - 0.03).toFixed(3));
+          if (endT > peakT) {
+            addBreathingHold(poseMap, posA, peakT, endT, sideKeys);
+            addPose(poseMap, endT, posA, sideKeys);
           }
         } else {
           // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 남으면 그 사이는
