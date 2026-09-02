@@ -4767,11 +4767,40 @@ window.loadAudioFile = function (input) {
 // 가능. BGM 드롭다운으로 바로 전환할 수 있다("끄기"는 무음 애니메이션 전용).
 const BGM_TRACKS = {
   track2:    { file: 'assets/track2_tutorial_master.mp3', label: 'Track2 Tutorial (Master)' },
+  track1:    { file: 'assets/track1_magicexe_master.mp3', label: 'Track1. Magic.exe (Master)', pattern: true, applyFn: () => _applyTrack1Pattern() },
   mastering: { file: 'assets/magicexe_mastering.mp3', label: 'MAGIC.EXE (Mastering)', pattern: true, applyFn: () => _applyMagicExePattern() },
   bitcrush:  { file: 'assets/magicexe_bitcrush.mp3',  label: 'MAGIC.EXE (Bitcrush)', pattern: true, applyFn: () => _applyMagicExePattern() },
   suno:      { file: 'assets/magicexe_suno.mp3', label: 'MAGIC.EXE (SUNO)', pattern: true, applyFn: () => _applySunoPattern() },
 };
 const _BGM_CHOICE_STORE = 'openarmx_bgm_choice_v1';
+
+// Track1 전용 타임라인 적용 — js/track1_pattern.js(별도 <script>)가 정의하는
+// TRACK1_PATTERN(drumId 이미 해석된 상태, beat=time_from_start/beatDur+1로
+// 직접 변환, 137.000064BPM 고정)으로 통째로 교체한다. Track2와 동일한
+// 이유로 곡 자체의 내장 무음(~2초)과 중복되지 않게 앱 인트로를 끈다.
+// 마디 수는 곡 길이(210.66초)에 가장 가깝게 끝나도록 120으로 고정.
+function _applyTrack1Pattern() {
+  if (typeof TRACK1_PATTERN === 'undefined' || !TRACK1_PATTERN.length) return;
+
+  timelineEvents = JSON.parse(JSON.stringify(TRACK1_PATTERN));
+  bpm = TRACK1_PATTERN_BPM;
+  totalBars = TRACK1_PATTERN_BARS;
+  const bpmEl  = document.getElementById('bpm-inp');
+  const barsEl = document.getElementById('bars-inp');
+  const introEl = document.getElementById('chk-intro');
+  if (bpmEl) bpmEl.value = bpm;
+  if (barsEl) barsEl.value = totalBars;
+  if (introEl && introEl.checked) introEl.checked = false;
+
+  updateTLInfo();
+  saveSettings();
+  saveTimeline();
+  renderTimeline();
+  _playKFs = buildFinalKeyframes();
+  _playDur = _playKFs.totalTime;
+  const scrubEl = document.getElementById('scrubber');
+  if (scrubEl) scrubEl.max = _playDur;
+}
 
 // MAGIC.EXE 전용 타임라인 적용 — 이 사이트의 원래(구) 기본 타임라인이었던
 // MAGICEXE_PATTERN(js/app.js 상단, timelineEvents 원본 스냅샷)으로

@@ -47,6 +47,7 @@
       <label title="Track2 Tutorial이 기본곡(MIDI 유래 실제 드럼 타이밍). MAGIC.EXE/SUNO는 각각 전용 타임라인(선택 시 자동 교체) — 끄기를 고르면 소리 없이 애니메이션만 재생됩니다">🎵 BGM
         <select id="bgm-sel" onchange="setBgmTrack(this.value)">
           <option value="track2">Track2 Tutorial (Master)</option>
+          <option value="track1">Track1. Magic.exe (Master)</option>
           <option value="mastering">MAGIC.EXE 믹스 (Mastering)</option>
           <option value="bitcrush">MAGIC.EXE 비트크러시 (Bitcrush)</option>
           <option value="suno">MAGIC.EXE (SUNO)</option>
@@ -258,7 +259,8 @@
 <script src="js/performance_presets.js?v=51"></script>
 <script src="js/suno_pattern.js?v=2"></script>
 <script src="js/track2_pattern.js?v=2"></script>
-<script type="module" src="js/app.js?v=195"></script>
+<script src="js/track1_pattern.js?v=1"></script>
+<script type="module" src="js/app.js?v=198"></script>
 <script>
 // 화면에 현재 로드된 app.js 버전을 보여준다 — 사용자가 겪은 문제를 재현해봐도
 // 재현이 안 될 때, 브라우저가 옛 버전을 캐시하고 있는 건 아닌지 devtools 없이도
