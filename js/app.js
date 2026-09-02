@@ -2436,8 +2436,26 @@ function buildKeyframes() {
           const holdStart = precedingPerfEnd;
           const holdT = parseFloat(Math.max(holdStart, raiseT - APPROACH_DUR).toFixed(3));
           if (holdT > holdStart + 0.001) {
-            addBreathingHold(poseMap, preLift[arm], holdStart, holdT, sideKeys);
-            addPose(poseMap, holdT, preLift[arm], sideKeys);
+            // 순수 대기 자세(READY)로만 쉬다가 APPROACH_DUR(약 0.17초, 짧다)
+            // 안에 곧장 이 드럼의 raise 자세로 가면, 두 자세 차이가 큰
+            // 조합(예: 크래시 치고 오래 쉬다가 하이햇)에서 관절이 좁은
+            // 시간에 크게 방향을 틀어야 해 "비스듬히 들어가는" 것처럼
+            // 보인다(사용자 지적). 대기 내내 순수 READY 대신, 이 다음
+            // 타격 쪽으로 살짝(HOLD_BIAS) 기울인 자세로 숨쉬게 해서 —
+            // 마지막 접근 구간이 다뤄야 할 각도 변화 자체를 줄인다.
+            // "peak"(다음 타격끼리의 중간 경유 자세, 위 next 분기 참고)와
+            // 같은 발상을 대기 시작점이 없는(이 팔의 첫 타격) 경우에
+            // 맞춰 적용한 것 — 너무 크게 기울이면 대기 자세가 사실상
+            // raise처럼 보여 "타격 준비" 티가 나므로 30% 정도로 제한.
+            const HOLD_BIAS = 0.3;
+            const raiseForBias = computeStrikePose(drum, 'raise', vel);
+            const biasedHold = {};
+            sideKeys.forEach(k => {
+              const base = preLift[arm][k] ?? 0;
+              biasedHold[k] = base + ((raiseForBias[k] ?? 0) - base) * HOLD_BIAS;
+            });
+            addBreathingHold(poseMap, biasedHold, holdStart, holdT, sideKeys);
+            addPose(poseMap, holdT, biasedHold, sideKeys);
           }
           addPose(poseMap, raiseT, computeStrikePose(drum, 'raise', vel), sideKeys);
         }
@@ -2525,7 +2543,25 @@ function buildKeyframes() {
         const sameDrum = next.drum.id === drum.id;
         const useNeutralHold = gap > IDLE_GAP_THRESHOLD && !sameDrum;
 
-        addPose(poseMap, peakT, useNeutralHold ? preLift[arm] : peak, sideKeys);
+        // 순수 중립(READY)으로 쉬다가 다음 드럼 쪽으로 스냅하면, 두 드럼의
+        // raise 자세 차이가 큰 조합(예: 크래시→하이햇)에서 짧은 스냅 구간
+        // 안에 관절이 크게 방향을 틀어야 해 "비스듬히 들어가는" 것처럼
+        // 보인다(사용자 지적). 중립을 다음 드럼(B) 쪽으로 살짝(HOLD_BIAS)
+        // 기울여, 스냅이 다뤄야 할 각도 변화 자체를 줄인다 — 이전에 겪은
+        // "Y자" 문제(중립→peak→raise(B) 두 단계로 꺾임)와는 다르다: 여기선
+        // 여전히 "기운 중립 하나 → raise(B)" 한 번의 아크만 그린다(추가
+        // 경유점 없음), 시작 자세만 미리 B 쪽으로 옮겨둔 것뿐이다.
+        const HOLD_BIAS = 0.3;
+        const neutralHoldPose = useNeutralHold ? (() => {
+          const p = {};
+          sideKeys.forEach(k => {
+            const base = preLift[arm][k] ?? 0;
+            p[k] = base + ((posB[k] ?? 0) - base) * HOLD_BIAS;
+          });
+          return p;
+        })() : null;
+
+        addPose(poseMap, peakT, useNeutralHold ? neutralHoldPose : peak, sideKeys);
 
         // 피크 이후 다음 타격 직전까지 남는 시간 안에서 raise(B)를 한 번 더 찍는다.
         // 이렇게 하면 다른 드럼으로 넘어갈 때도 마지막 진입 구간만큼은 J1~J6 고정 +
@@ -2557,9 +2593,9 @@ function buildKeyframes() {
           // 평평하게 고정한다.
           if (snapT > peakT) {
             const midT = parseFloat(((peakT + snapT) / 2).toFixed(3));
-            if (midT > peakT && midT < snapT) addPose(poseMap, midT, preLift[arm], sideKeys);
-            addBreathingHold(poseMap, preLift[arm], peakT, snapT, sideKeys);
-            addPose(poseMap, snapT, preLift[arm], sideKeys);
+            if (midT > peakT && midT < snapT) addPose(poseMap, midT, neutralHoldPose, sideKeys);
+            addBreathingHold(poseMap, neutralHoldPose, peakT, snapT, sideKeys);
+            addPose(poseMap, snapT, neutralHoldPose, sideKeys);
           }
         } else {
           // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 남으면 그 사이는
