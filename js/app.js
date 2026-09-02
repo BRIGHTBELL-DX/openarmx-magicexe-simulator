@@ -2149,7 +2149,13 @@ function computeStrikePose(drum, phase, vel = 'medium') {
   // 그대로다. contactDelta는 strike·raise·rebound 전부에 똑같이 더해서
   // "타격점 자체가 이동"한 효과만 내고 스윙에는 영향을 주지 않는다.
   if (phase === 'raise' || phase === 'rebound') {
-    const baseRaw  = ({ raise: -0.86, rebound: -0.54 })[phase] * styleScale - stickJ7Offset;
+    // rebound(타격 직후 회수) 손목 코킹 기준각을 raise와 동일한 -0.86으로
+    // 통일 — 예전엔 -0.54로 raise보다 훨씬 얕게 잡아, 단발 타격의 회수가
+    // "찔끔 올라오는" 느낌이었다(사용자 지적: "중 강도면 더 올라와야
+    // 할 것 같은데" — 실측: medium 기준 스틱 끝 0.40m, raise는 0.50m).
+    // 속도별 폭은 여전히 rebZ가 별도로 조절하므로(raiseZ와 다른 클램프
+    // 범위), 기준각만 raise와 맞추고 세기별 스케일 차이는 그대로 유지.
+    const baseRaw  = ({ raise: -0.86, rebound: -0.86 })[phase] * styleScale - stickJ7Offset;
     const j7Phase  = s === 'L' ? baseRaw : -baseRaw;
     const velScale = phase === 'raise'
       ? clamp(vs.raiseZ, 0.55, 1.35)
