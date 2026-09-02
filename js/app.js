@@ -3492,6 +3492,14 @@ function _preloadDrumSamples(ctx) {
 const _MAX_VOICES_PER_TYPE = 5;
 const _activeVoices = {};   // { [type]: Array<{src, gain, ctx}> }
 
+// 심벌류(하이햇/크래시/라이드)는 악기 특성상 원래도 광대역 노이즈(쉬머)
+// 비중이 크고, 실제 곡 패턴(하이햇 8분음표 연타, 라이드 계속 유지 등)에서
+// 등장 빈도 자체가 킥/스네어/탐보다 훨씬 높다 — 그래서 버스 EQ만으로는
+// 부족하고("백색소음 같은 게 너무 강하다" 지적), 이 계열의 절대 음량 자체를
+// 낮춰야 전체적으로 "쉭쉭거리는" 느낌이 줄어든다. 킥/스네어/탐은 원래
+// 음량 유지(펀치감이 죽으면 안 됨).
+const _CYMBAL_TYPE_GAIN = { hihat: 0.6, crash: 0.65, ride: 0.6 };
+
 function _playDrumSample(type, vel, ctx, dest) {
   const buf = _drumSampleBuffers[type]?.[vel] || _drumSampleBuffers[type]?.medium;
   if (!buf) return false;
@@ -3510,6 +3518,7 @@ function _playDrumSample(type, vel, ctx, dest) {
 
   const src = ctx.createBufferSource();
   const g   = ctx.createGain();
+  g.gain.value = _CYMBAL_TYPE_GAIN[type] ?? 1.0;
   src.buffer = buf;
   src.connect(g); g.connect(dest);
   src.start();
@@ -3531,8 +3540,10 @@ function _scheduleDrumSampleAt(type, vel, ctx, t, dest) {
   const buf = _drumSampleBuffers[type]?.[vel] || _drumSampleBuffers[type]?.medium;
   if (!buf) return false;
   const src = ctx.createBufferSource();
+  const g   = ctx.createGain();
+  g.gain.value = _CYMBAL_TYPE_GAIN[type] ?? 1.0;
   src.buffer = buf;
-  src.connect(dest);
+  src.connect(g); g.connect(dest);
   src.start(t);
   return true;
 }
