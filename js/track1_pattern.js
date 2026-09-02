@@ -4,25 +4,21 @@
  * ⚠ 2026-09-02 타이밍 버그 수정(2차): 이전 수정(-5.567박, 8/12 예전
  * 파일 기준)이 0-베이스→1-베이스 변환에서 +1을 빠뜨려 전체가 정확히
  * 1박(beatDur=0.437956s, 137.000064BPM)만큼 계속 일찍 울리고 있었다.
+ * 사용자가 제공한 Track1_Magic_exe_drums_SYNC_CORRECTED.yaml(공식 킥
+ * 타이밍 수정본)과 "Track1. Magic.exe - Drums - #2.wav"(드럼 단독
+ * 스템) 실측으로 확정 — 자세한 근거는 커밋 이력 참고.
  *
- * 발견 경위: 사용자가 제공한 Track1_Magic_exe_drums_SYNC_CORRECTED.yaml
- * (공식 킥 타이밍 수정본)의 beat 필드가 0-베이스(beat*beatDur=
- * time_from_start)로 확인됨 — 이 앱의 스케줄 공식은 1-베이스
- * ((beat-1)*beatDur)라서 +1이 필요한데, 지난 수정 때 8/12 예전 파일의
- * beat 값(마찬가지로 0-베이스)을 그대로 갖다 썼다(+1을 안 함).
+ * 2026-09-02(06:27) 추가 편집 반영: 사용자가 프로젝트 파일로 보내준
+ * 추가 편집본(magicexe_project_202609020627230.json)을 반영 — 이
+ * 파일은 위 +1 보정 전(구) 넘버링으로 내보내진 것이었어서, 그대로
+ * 쓰면 타이밍 수정이 도로 풀린다. 파일 전체에 +1.0을 다시 적용해
+ * 확인해보니 기존 배포본과 beat 값이 정확히 하나(스네어 434.933→
+ * 435.0, 끝부분 그리드 스냅)만 빼고 전부 일치 — 그 한 곳만 실제 편집,
+ * 나머지는 이 앱의 프로젝트 저장/불러오기를 거치며 그대로 보존된 것.
  *
- * 증거: 곡 전체에 걸쳐 반복되는 그루브 구간(8분음표 등)은 반박자
- * 주기라서 1박 밀려도 "같은 패턴의 다른 타격"과 우연히 맞아떨어져
- * 검증에서 안 걸렸다 — 대신 주기적이지 않은 지점(첫 킥, 마지막 킥,
- * 중간 크래시 2곳)으로 "Track1. Magic.exe - Drums - #2.wav"(드럼
- * 단독 스템)를 재검증하니 4곳 전부 밀리초 단위로 일치했다(+1박 적용
- * 전엔 전부 약 0.438초씩 어긋나 있었음).
- *
- * 수정: 직전 배포본(사용자가 팔 충돌 정리를 위해 1158개로 편집한 것)의
- * beat 값 전체에 +1.0만 일괄 적용 — 어떤 타격을 남길지(선곡)는 전혀
- * 안 건드림, 타이밍만 정확한 위치로 이동.
- *
- * 마디 수는 곡 길이(210.66초)에 가장 가깝게 끝나도록 120마디로 고정.
+ * 원본 WAV(210.66초)는 파일 자체에 이미 2초 무음이 내장돼 있다 — SUNO/
+ * Track2와 동일한 이유로 이 곡을 고르면 앱의 "4마디 인트로"(+4초)를 끈다.
+ * 마디 수는 곡 길이에 가장 가깝게 끝나도록 120마디로 고정.
  * velocity는 전부 medium으로 통일(사용자 요청).
  */
 const TRACK1_PATTERN_BPM  = 137.000064;
@@ -768,20 +764,20 @@ const TRACK1_PATTERN = [
 {drumId:'d2',beat:306.933,vel:'medium'},
 {drumId:'d4',beat:307.000,vel:'medium'},
 {drumId:'d4',beat:308.000,vel:'medium'},
-{drumId:'d2',beat:309.000,vel:'medium'},
 {drumId:'d4',beat:309.000,vel:'medium'},
+{drumId:'d2',beat:309.000,vel:'medium'},
 {drumId:'d4',beat:310.000,vel:'medium'},
 {drumId:'d2',beat:310.933,vel:'medium'},
 {drumId:'d4',beat:311.000,vel:'medium'},
 {drumId:'d4',beat:312.000,vel:'medium'},
-{drumId:'d2',beat:313.000,vel:'medium'},
 {drumId:'d4',beat:313.000,vel:'medium'},
+{drumId:'d2',beat:313.000,vel:'medium'},
 {drumId:'d4',beat:314.000,vel:'medium'},
 {drumId:'d2',beat:314.933,vel:'medium'},
 {drumId:'d4',beat:315.000,vel:'medium'},
 {drumId:'d4',beat:316.000,vel:'medium'},
-{drumId:'d2',beat:317.000,vel:'medium'},
 {drumId:'d4',beat:317.000,vel:'medium'},
+{drumId:'d2',beat:317.000,vel:'medium'},
 {drumId:'d4',beat:318.000,vel:'medium'},
 {drumId:'d4',beat:318.500,vel:'medium'},
 {drumId:'d2',beat:318.933,vel:'medium'},
@@ -791,8 +787,8 @@ const TRACK1_PATTERN = [
 {drumId:'d4',beat:320.250,vel:'medium'},
 {drumId:'d4',beat:320.500,vel:'medium'},
 {drumId:'d4',beat:320.750,vel:'medium'},
-{drumId:'d2',beat:321.000,vel:'medium'},
 {drumId:'d4',beat:321.000,vel:'medium'},
+{drumId:'d2',beat:321.000,vel:'medium'},
 {drumId:'d4',beat:321.250,vel:'medium'},
 {drumId:'d4',beat:321.500,vel:'medium'},
 {drumId:'d4',beat:321.750,vel:'medium'},
@@ -1115,7 +1111,7 @@ const TRACK1_PATTERN = [
 {drumId:'d7',beat:433.000,vel:'medium'},
 {drumId:'d0',beat:433.500,vel:'medium'},
 {drumId:'d2',beat:434.000,vel:'medium'},
-{drumId:'d2',beat:434.933,vel:'medium'},
+{drumId:'d2',beat:435.000,vel:'medium'},
 {drumId:'d1',beat:438.000,vel:'medium'},
 {drumId:'d4',beat:438.000,vel:'medium'},
 {drumId:'d7',beat:438.000,vel:'medium'},
