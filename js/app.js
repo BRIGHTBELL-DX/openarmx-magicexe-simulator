@@ -3548,13 +3548,29 @@ window.setDrumClickVolume = function (val) {
 // 만들어지므로 그때그때 별도로 하나 만들어 쓴다(_drumSounds 쪽은 dest를
 // 인자로 받아 양쪽 다 대응).
 function _makeDrumBus(c) {
+  // 하이햇·크래시·라이드·스네어가 전부 9kHz 안팎 고역 노이즈를 상당히
+  // 쓰다 보니(개별 합성/샘플은 그대로 두고) 여러 타격이 겹치면 그 고역이
+  // 누적돼 "소음처럼" 거칠게 들린다는 지적 — 컴프레서 앞에 완만한 하이
+  // 쉘프 컷을 하나 걸어 버스 전체를 한 번에 다듬는다. 모든 드럼 소리가
+  // 이 버스(라이브 클릭음 + WAV 내보내기 둘 다 _makeDrumBus 하나 공유)를
+  // 거치므로 종류별 코드를 건드리지 않고 전체가 같이 정돈된다.
+  const shelf = c.createBiquadFilter();
+  shelf.type = 'highshelf';
+  shelf.frequency.value = 7000;
+  shelf.gain.value = -7;   // dB
+
   const comp = c.createDynamicsCompressor();
-  // 임계값을 높이고(덜 자주 눌림) release를 짧게 해서, 라이드처럼 길게
-  // 우는 소리 직후에 오는 스네어 등이 눌려서 작게 들리는 문제를 줄인다.
-  comp.threshold.value = -10; comp.knee.value = 6;
-  comp.ratio.value = 3; comp.attack.value = 0.002; comp.release.value = 0.06;
+  // 임계값을 낮추고 어택을 더 빠르게 해서, 여러 타격이 겹칠 때(특히
+  // 조밀한 실제 MIDI 패턴) 튀는 피크를 확실히 눌러 "겹쳐서 거칠어지는"
+  // 부분을 줄인다. release는 라이드처럼 길게 우는 소리 직후 스네어가
+  // 눌려 작게 들리는 문제(기존 튜닝 이유)가 재발하지 않을 정도로만
+  // 살짝 늘렸다.
+  comp.threshold.value = -16; comp.knee.value = 8;
+  comp.ratio.value = 4; comp.attack.value = 0.001; comp.release.value = 0.08;
+
+  shelf.connect(comp);
   comp.connect(c.destination);
-  return comp;
+  return shelf;
 }
 
 // ── 저수준 합성 유틸 ──────────────────────────────────────────
