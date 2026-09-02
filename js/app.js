@@ -1518,17 +1518,27 @@ let timelineEvents = [
   {drumId:'d6',beat:7.5,vel:'hard',arm:'R'},
   {drumId:'d7',beat:8.5,vel:'hard',arm:'R'},
 ];
-// 사이트 첫 접속 시 표출되는 기본 상태 스냅샷 — SUNO 트랙(전용 패턴으로
-// 타임라인을 통째로 교체)에서 다시 Mastering/Bitcrush로 돌아올 때 이
-// 초기 상태로 복원하는 데 쓴다(_applySunoPattern 반대편, setBgmTrack의
-// mastering/bitcrush 분기 참고).
-const DEFAULT_TIMELINE_EVENTS = JSON.parse(JSON.stringify(timelineEvents));
-const DEFAULT_BPM = 137.000064;
-const DEFAULT_TOTAL_BARS = 122;
+// 위 배열은 원래 이 사이트의 기본곡이었던 MAGIC.EXE(Mastering/Bitcrush)
+// 전용 타임라인이다 — Track2(아래)를 새 기본값으로 바꾸면서, MAGIC.EXE는
+// SUNO와 동일한 "명시적으로 고르면 전용 패턴으로 교체"(pattern:true)
+// 방식으로 옮긴다. 그 복원용 스냅샷을 여기서 떠 둔다(_applyMagicExePattern
+// 참고).
+const MAGICEXE_PATTERN = JSON.parse(JSON.stringify(timelineEvents));
+const MAGICEXE_BPM     = 137.000064;
+const MAGICEXE_BARS    = 122;
 
-let bpm = 137.000064; // 사용자 프로젝트 파일 기준 원곡 템포
+// 사이트 첫 접속 시 표출되는 새 기본값 — Track2 Tutorial(MIDI 유래 실제
+// 드럼 타이밍) BGM 전용 타임라인(js/track2_pattern.js). MAGIC.EXE/SUNO
+// 등 다른 트랙에서 돌아올 때도 이 상태로 복원한다(_restoreDefaultTimeline
+// 참고, setBgmTrack의 restoredDefault 분기).
+timelineEvents = TRACK2_PATTERN;
+const DEFAULT_TIMELINE_EVENTS = JSON.parse(JSON.stringify(timelineEvents));
+const DEFAULT_BPM = TRACK2_PATTERN_BPM;
+const DEFAULT_TOTAL_BARS = TRACK2_PATTERN_BARS;
+
+let bpm = DEFAULT_BPM;
 let beatsPerBar = 4;
-let totalBars = 122;
+let totalBars = DEFAULT_TOTAL_BARS;
 let defaultVel     = 'medium'; // 타임라인 클릭 기본 velocity
 // 타격점(J1~J7)은 고정 — raise 시 J7이 얼마나 더 젖혀지는지(들어올리는 높이)만 조절.
 // 양수 = 더 높이 들어 강하게, 음수 = 낮게 들어 약하게. 팔별 부호(L:-/R:+)는
@@ -4750,18 +4760,44 @@ window.loadAudioFile = function (input) {
   reader.readAsArrayBuffer(file);
 };
 
-// 이 도구는 MAGIC.EXE 한 곡 전용이라, 페이지 로드시 곡을 자동으로 재생
-// 트랙에 로드한다 — "🎵 음악 로드"로 다른 파일을 올리면 그걸로 교체 가능.
-// 같은 타임라인 기준으로 믹스/드럼만/노래만 3가지 버전이 있어 BGM
-// 드롭다운으로 바로 전환할 수 있다("끄기"는 무음 애니메이션 전용).
+// 이 도구는 원래 MAGIC.EXE 한 곡 전용이었으나, Track2 Tutorial(MIDI 유래
+// 실제 드럼 타이밍)이 새 기본곡이 되면서 MAGIC.EXE/SUNO도 "명시적으로
+// 고르면 그 곡 전용 타임라인으로 통째로 교체"(pattern:true + applyFn)
+// 방식으로 통일했다 — "🎵 음악 로드"로 다른 파일을 올리면 그걸로 교체
+// 가능. BGM 드롭다운으로 바로 전환할 수 있다("끄기"는 무음 애니메이션 전용).
 const BGM_TRACKS = {
-  mastering: { file: 'assets/magicexe_mastering.mp3', label: 'MAGIC.EXE (Mastering)' },
-  bitcrush:  { file: 'assets/magicexe_bitcrush.mp3',  label: 'MAGIC.EXE (Bitcrush)' },
-  // suno_pattern.js(robot_control_8_instruments.yaml 변환본)가 로드돼 있으면
-  // 이 트랙을 고를 때 그 전용 타임라인으로 통째로 교체한다(pattern 플래그).
-  suno:      { file: 'assets/magicexe_suno.mp3', label: 'MAGIC.EXE (SUNO)', pattern: true },
+  track2:    { file: 'assets/track2_tutorial_master.mp3', label: 'Track2 Tutorial (Master)' },
+  mastering: { file: 'assets/magicexe_mastering.mp3', label: 'MAGIC.EXE (Mastering)', pattern: true, applyFn: () => _applyMagicExePattern() },
+  bitcrush:  { file: 'assets/magicexe_bitcrush.mp3',  label: 'MAGIC.EXE (Bitcrush)', pattern: true, applyFn: () => _applyMagicExePattern() },
+  suno:      { file: 'assets/magicexe_suno.mp3', label: 'MAGIC.EXE (SUNO)', pattern: true, applyFn: () => _applySunoPattern() },
 };
 const _BGM_CHOICE_STORE = 'openarmx_bgm_choice_v1';
+
+// MAGIC.EXE 전용 타임라인 적용 — 이 사이트의 원래(구) 기본 타임라인이었던
+// MAGICEXE_PATTERN(js/app.js 상단, timelineEvents 원본 스냅샷)으로
+// 통째로 교체한다. _applySunoPattern()의 반대편(원래는 이쪽이 "기본"
+// 이었지만 Track2로 기본값이 바뀌며 이쪽도 전용 패턴 취급이 됨) —
+// 그래서 인트로는 다시 켠다(Track2/SUNO와 반대로 이 곡은 앱 자체
+// 인트로 애니메이션을 쓰는 원래 방식).
+function _applyMagicExePattern() {
+  timelineEvents = JSON.parse(JSON.stringify(MAGICEXE_PATTERN));
+  bpm = MAGICEXE_BPM;
+  totalBars = MAGICEXE_BARS;
+  const bpmEl  = document.getElementById('bpm-inp');
+  const barsEl = document.getElementById('bars-inp');
+  const introEl = document.getElementById('chk-intro');
+  if (bpmEl) bpmEl.value = bpm;
+  if (barsEl) barsEl.value = totalBars;
+  if (introEl && !introEl.checked) introEl.checked = true;
+  updateTLInfo();
+  saveSettings();
+  saveTimeline();
+  renderTimeline();
+  _playKFs = buildFinalKeyframes();
+  _playDur = _playKFs.totalTime;
+  const scrubEl = document.getElementById('scrubber');
+  if (scrubEl) scrubEl.max = _playDur;
+}
 
 // SUNO 트랙 전용 타임라인 적용 — suno_pattern.js(별도 <script>)가 정의하는
 // SUNO_PATTERN(드럼 타입+beat, 이 곡 전용 BPM 기준)을 현재 drumKit에 맞춰
@@ -4817,11 +4853,13 @@ function _applySunoPattern() {
   if (scrubEl) scrubEl.max = _playDur;
 }
 
-// SUNO(전용 패턴) 트랙에서 다른 트랙으로 돌아올 때, 사이트 첫 접속 시
-// 상태(기본 타임라인·BPM·마디 수·인트로 켬)로 복원한다 — 사용자 요청:
-// "SUNO였다가 다시 magic.exe 노래로 변경하면 사이트 처음 접속하면
-// 표출되는 타임라인으로 변경되도록". 새로고침을 거쳐도 동작해야 하므로
-// 런타임 플래그가 아니라 localStorage에 저장된 "직전 선택"으로 판단한다.
+// 전용 패턴 트랙(MAGIC.EXE/SUNO)에서 다시 기본(Track2)으로 돌아올 때,
+// 사이트 첫 접속 시 상태(기본 타임라인·BPM·마디 수·인트로 끔)로
+// 복원한다 — 사용자 요청: "SUNO였다가 다시 magic.exe 노래로 변경하면
+// 사이트 처음 접속하면 표출되는 타임라인으로 변경되도록"(Track2가 기본이
+// 되면서 이 로직 자체는 그대로, 대상만 MAGIC.EXE→Track2로 바뀜). 새로고침을
+// 거쳐도 동작해야 하므로 런타임 플래그가 아니라 localStorage에 저장된
+// "직전 선택"으로 판단한다.
 function _restoreDefaultTimeline() {
   timelineEvents = JSON.parse(JSON.stringify(DEFAULT_TIMELINE_EVENTS));
   bpm = DEFAULT_BPM;
@@ -4831,7 +4869,9 @@ function _restoreDefaultTimeline() {
   const introEl = document.getElementById('chk-intro');
   if (bpmEl) bpmEl.value = bpm;
   if (barsEl) barsEl.value = totalBars;
-  if (introEl && !introEl.checked) introEl.checked = true;
+  // 기본값이 Track2로 바뀌면서 인트로도 꺼짐이 기본(곡 자체에 이미 무음
+  // 도입부가 있어 앱 인트로와 중복되면 안 됨) — 예전엔 여기서 켜졌었다.
+  if (introEl && introEl.checked) introEl.checked = false;
   updateTLInfo();
   saveSettings();
   saveTimeline();
@@ -4887,14 +4927,29 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
     const buf = await res.arrayBuffer();
     const decoded = await _audioCtx.decodeAudioData(buf);
     _applyLoadedBgmBuffer(decoded, track.label);
+    // _applyLoadedBgmBuffer는 안전하게 "모자라면 올린다"만 하는데, Track2는
+    // 곡 길이(169.4s)에 딱 맞춘 98마디가 의도된 값이다(99마디부터 곡이 끝난
+    // 뒤 1초 넘게 정적 구간이 남음 — 사용자 확인: "노래 끝나는 지점에서
+    // 마디 끝나면"). 그 사이 살짝 더 긴 마디로 올라갔다면 다시 내린다.
+    if (choice === 'track2' && typeof TRACK2_PATTERN_BARS !== 'undefined' && totalBars !== TRACK2_PATTERN_BARS) {
+      totalBars = TRACK2_PATTERN_BARS;
+      const barsEl = document.getElementById('bars-inp');
+      if (barsEl) barsEl.value = totalBars;
+      updateTLInfo();
+      renderTimeline();
+      _playKFs = buildFinalKeyframes();
+      _playDur = _playKFs.totalTime;
+      const scrubEl = document.getElementById('scrubber');
+      if (scrubEl) scrubEl.max = _playDur;
+    }
     // silent(=페이지 로드 시 마지막 선택 복원)일 땐 패턴을 다시 덮어쓰지
     // 않는다 — 그렇지 않으면 SUNO 선택 후 타임라인을 직접 수정했더라도
     // 새로고침할 때마다 원본 yaml 패턴으로 매번 되돌아가 버린다. 명시적으로
     // 드롭다운에서 고를 때만(!silent) 실제로 "덮어쓰고 교체"한다.
-    if (track.pattern && !silent) _applySunoPattern();
-    // 반대 방향 — SUNO에서 Mastering/Bitcrush로 돌아오면 사이트 첫 접속
-    // 상태로 복원(마찬가지로 명시적 선택일 때만).
-    const restoredDefault = !track.pattern && previousChoice === 'suno' && !silent;
+    if (track.pattern && !silent) track.applyFn();
+    // 반대 방향 — 전용 패턴 트랙(MAGIC.EXE/SUNO)에서 기본(Track2)으로
+    // 돌아오면 사이트 첫 접속 상태로 복원(마찬가지로 명시적 선택일 때만).
+    const restoredDefault = !track.pattern && BGM_TRACKS[previousChoice]?.pattern && !silent;
     if (restoredDefault) _restoreDefaultTimeline();
     setStatus(
       `음악 로드: ${track.label} (${_audioBuf.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디` +
@@ -4910,14 +4965,14 @@ window.setBgmTrack = async function (choice, { silent = false } = {}) {
 };
 
 async function _autoLoadDefaultSong() {
-  let choice = 'mastering';
-  try { choice = localStorage.getItem(_BGM_CHOICE_STORE) || 'mastering'; } catch (e) {}
+  let choice = 'track2';
+  try { choice = localStorage.getItem(_BGM_CHOICE_STORE) || 'track2'; } catch (e) {}
   // 커스텀 트랙은 세션 한정이라 새로고침 후엔 복원할 버퍼가 없다 —
-  // 기본값(mastering)으로 대신 로드한다.
-  if (choice === 'custom') choice = 'mastering';
+  // 기본값(track2)으로 대신 로드한다.
+  if (choice === 'custom') choice = 'track2';
   await window.setBgmTrack(choice, { silent: true });
   if (choice === 'off') { setStatus('BGM 꺼짐 (이전 선택 복원) — 소리 없이 애니메이션만 재생됩니다'); return; }
-  const track = BGM_TRACKS[choice] || BGM_TRACKS.mastering;
+  const track = BGM_TRACKS[choice] || BGM_TRACKS.track2;
   setStatus(`곡 자동 로드: ${track.label} (${_audioBuf?.duration.toFixed(1)}s) · 타임라인 ${totalBars}마디`);
 }
 
