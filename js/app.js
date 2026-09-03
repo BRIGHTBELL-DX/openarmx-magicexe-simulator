@@ -2549,29 +2549,21 @@ function buildKeyframes() {
         const sameDrum = next.drum.id === drum.id;
         const useNeutralHold = gap > IDLE_GAP_THRESHOLD && !sameDrum;
 
-        // 같은 드럼이 "진짜 긴" 휴지(예: 몇 마디 쉬었다가 같은 스네어로
-        // 복귀)를 두고 다시 온다면 peak(연타 전용, J4 +0.45 추가 클리어런스)
-        // 로 휴지 전체를 채우면 팔이 필요 이상으로 높이 들린 채 계속 떠
-        // 있는 것처럼 보인다(사용자 지적: "대기 자세로 돌아가는 각도가
-        // 너무 비스듬하게 올라간다" — 실측: 스네어 2.59초 휴지에서 재현).
-        // 이 클리어런스는 원래 "빠른 연타 중 스틱이 드럼 표면을 스치지
-        // 않도록" 만든 것이라, 진짜 쉬는 구간엔 필요 없다 — 같은 드럼이라
-        // raise(A)==raise(B)이므로 raise 자세 그대로 대기하면 이미 다음
-        // 타격 자세에 도착해 있는 셈이라 추가 스냅 구간도 필요 없다.
-        //
-        // 다만 이 판정은 "다른 드럼으로 바뀔 때"(useNeutralHold, 위)보다
-        // 훨씬 너그러운 기준(더 큰 간격)이어야 한다 — 실측 확인: 일정한
-        // 박자로 반복되는 같은 드럼 비트(예: 스네어가 0.86초 간격으로
-        // 계속 나오는 백비트)에서도 IDLE_GAP_THRESHOLD(약 0.49초)를 넘어
-        // 매번 peak 대신 이 낮은 홀드를 타면, 오히려 "타격 후 거의 안
-        // 올라온다"는 정반대 불만이 나왔다(사용자 지적: "지금 티가 너무
-        // 안 나서" — 경유(peak) 높이만큼 튀어야 타격감이 산다는 것).
-        // 즉 "일정한 비트로 계속 반복" vs "몇 박 이상 진짜로 쉼"을
-        // 간격 크기로 구분해야 하는데, 두 실측 사례(0.86초 vs 2.59초)가
-        // 상당히 벌어져 있어 박자 단위(beatDur) 배수로 넉넉히 큰 임계값을
-        // 잡으면 안전하게 나뉜다.
-        const SAME_DRUM_IDLE_THRESHOLD = beatDur * 3;
-        const sameDrumIdleHold = gap > SAME_DRUM_IDLE_THRESHOLD && sameDrum;
+        // ⚠ 튜닝 히스토리 — 같은 드럼 재타격 대기 높이 ⚠
+        // 한때 "같은 드럼+간격이 길면 peak 대신 낮은 raise 높이로 대기"
+        // 하는 로직이 있었다 — 하이햇 롤이 끝나고 진짜 오래 쉬는 구간
+        // (실측 2.59초)에서 peak(J4 +0.45 클리어런스)로 계속 떠 있으면
+        // "비스듬히 뜬다"는 지적 때문이었다. 그런데 간격 크기만으로
+        // "진짜 쉼"과 "그냥 좀 긴 정박/애매한 박자"를 구분하려 하니
+        // 임계값을 아무리 조정해도 경계 케이스가 계속 나왔다 — Track1·
+        // Track2 실측 간격 분포가 0.86초부터 4.3초까지 촘촘하게 걸쳐
+        // 있어(1.35초, 1.75초, 2.15초 등 애매한 값이 다수), 어느 기준을
+        // 잡아도 "여기는 왜 짧게 들지?"라는 불만이 재발했다(사용자 실측
+        // 사례: 43.61초, 간격 1.35초인데 낮은 홀드로 분류됨). 결국 간격
+        // 기반 판정을 포기하고 "같은 드럼 재타격은 간격과 무관하게 항상
+        // peak 높이로 고정"하기로 했다(사용자 결정: "간격 관계없이 항상
+        // 높게 고정") — 아래 peak가 그 결과이며, sameDrum 자체는 여전히
+        // useNeutralHold 판정(다른 드럼으로 바뀌는 공백인지)에 쓰인다.
 
         // 순수 중립(READY)으로 쉬다가 다음 드럼 쪽으로 스냅하면, 두 드럼의
         // raise 자세 차이가 큰 조합(예: 크래시→하이햇)에서 짧은 스냅 구간
@@ -2591,7 +2583,7 @@ function buildKeyframes() {
           return p;
         })() : null;
 
-        addPose(poseMap, peakT, useNeutralHold ? neutralHoldPose : (sameDrumIdleHold ? posA : peak), sideKeys);
+        addPose(poseMap, peakT, useNeutralHold ? neutralHoldPose : peak, sideKeys);
 
         // 피크 이후 다음 타격 직전까지 남는 시간 안에서 raise(B)를 한 번 더 찍는다.
         // 이렇게 하면 다른 드럼으로 넘어갈 때도 마지막 진입 구간만큼은 J1~J6 고정 +
@@ -2626,15 +2618,6 @@ function buildKeyframes() {
             if (midT > peakT && midT < snapT) addPose(poseMap, midT, neutralHoldPose, sideKeys);
             addBreathingHold(poseMap, neutralHoldPose, peakT, snapT, sideKeys);
             addPose(poseMap, snapT, neutralHoldPose, sideKeys);
-          }
-        } else if (sameDrumIdleHold) {
-          // raise(A)==raise(B)라 스냅 구간 없이 raise 자세 그대로 다음
-          // 타격 직전까지 숨쉬듯 대기한다 — 이미 도착해야 할 자세이므로
-          // "돌아왔다가 다시 그쪽으로 기운다"는 티가 전혀 나지 않는다.
-          const endT = parseFloat(Math.min(raiseBT, next.t - 0.03).toFixed(3));
-          if (endT > peakT) {
-            addBreathingHold(poseMap, posA, peakT, endT, sideKeys);
-            addPose(poseMap, endT, posA, sideKeys);
           }
         } else {
           // peak 도달 후 다음 접근(raiseBT) 전까지 여유가 남으면 그 사이는
