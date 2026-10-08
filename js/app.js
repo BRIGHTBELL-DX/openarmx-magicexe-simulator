@@ -44,16 +44,17 @@ const VEL_GLOW = {
 // 로봇 동작에는 영향이 없다 — MIDI 원곡 킥 타점을 타임라인에서 확인만
 // 하기 위해 넣어둔 것.
 let drumKit = [
-  // 2026-08-10: 사용자가 저장한 프로젝트 파일(magicexe_project_202608100019379.json)
-  // 기준으로 기본 배치 확정.
-  { id:'d0', name:'하이 햇', type:'hihat', arm:'L', pos:{x:0.552, y:0.475, z:0.3} },
-  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.747, y:0.353, z:0.35} },
-  { id:'d2', name:'스네어', type:'snare', arm:'R', pos:{x:0.59, y:0, z:0.17} },
+  // 2026-10-08: 오프라인 실측 후 재배치 확정 — 하이햇을 x+로 옮겨 손목 스윙
+  // 축을 세우고(옆 밀림 19→10cm), 크래쉬·라이드를 올려 스틱 간섭을 줄임.
+  // (이전: 2026-08-10 magicexe_project_202608100019379.json 기준 배치)
+  { id:'d0', name:'하이 햇', type:'hihat', arm:'L', pos:{x:0.62, y:0.44, z:0.3} },
+  { id:'d1', name:'크래쉬 심벌', type:'crash', arm:'L', pos:{x:0.8, y:0.4, z:0.4} },
+  { id:'d2', name:'스네어', type:'snare', arm:'R', pos:{x:0.59, y:0, z:0.1} },
   { id:'d3', name:'스몰 탐', type:'tom_h', arm:'L', pos:{x:0.8, y:0.15, z:0.3} },
   { id:'d4', name:'킥 (베이스 드럼)', type:'kick', arm:'R', pos:{x:0.63, y:0, z:0.12} },
   { id:'d5', name:'미들 탐', type:'tom_m', arm:'R', pos:{x:0.8, y:-0.15, z:0.3} },
-  { id:'d6', name:'플로어 탐', type:'tom_f', arm:'R', pos:{x:0.525, y:-0.575, z:0.18} },
-  { id:'d7', name:'라이드 심벌', type:'ride', arm:'R', pos:{x:0.735, y:-0.418, z:0.35} },
+  { id:'d6', name:'플로어 탐', type:'tom_f', arm:'R', pos:{x:0.53, y:-0.57, z:0.18} },
+  { id:'d7', name:'라이드 심벌', type:'ride', arm:'R', pos:{x:0.78, y:-0.44, z:0.4} },
 ];
 // id는 비연속(d4 없음)일 수 있으므로 개수가 아니라 최대 id+1로 다음 id를 잡는다.
 let nextDrumId = Math.max(8, ...drumKit.map(d => parseInt(d.id.replace(/\D/g, '')) + 1));
@@ -2497,11 +2498,18 @@ function buildKeyframes() {
         const posA  = computeStrikePose(drum,      'raise', vel);
         const posB  = computeStrikePose(next.drum, 'raise', next.vel ?? 'medium');
         const peak  = {};
+        // 하이햇 연타는 팔꿈치(J4) 추가 굽힘을 0.45 → 0.2로 줄인다 — 하이햇
+        // 자리에선 J4 굽힘이 스틱을 몸 안쪽으로 휘게 만들어, 타격 호와 회수
+        // 호가 달라 보였다. 실측(1박 연타, 옆 밀림/회수 높이): 0.45 → 19/60cm,
+        // 0.2 → 13/48cm, 0 → 9/40cm. 0은 위아래 움직임이 너무 작아 보인다는
+        // 지적으로 절충. 손목(J7)을 더 꺾어 높이를 버는 방식은 같은 높이에서
+        // 옆·앞뒤 흔들림이 더 커서(손목 +0.4: 옆 14, 앞뒤 20, 높이 49) 기각.
+        const hihatRoll = drum.type === 'hihat' && next.drum.id === drum.id;
         sideKeys.forEach(k => {
           const a = posA[k] ?? 0;
           const b = posB[k] ?? 0;
           let v = (a + b) / 2;
-          if (k.endsWith('4')) v = clamp(v + 0.45, 0.10, 1.70);
+          if (k.endsWith('4')) v = clamp(v + (hihatRoll ? 0.2 : 0.45), 0.10, 1.70);
           peak[k] = v;
         });
 
@@ -2573,7 +2581,17 @@ function buildKeyframes() {
         // "Y자" 문제(중립→peak→raise(B) 두 단계로 꺾임)와는 다르다: 여기선
         // 여전히 "기운 중립 하나 → raise(B)" 한 번의 아크만 그린다(추가
         // 경유점 없음), 시작 자세만 미리 B 쪽으로 옮겨둔 것뿐이다.
-        const HOLD_BIAS = 0.3;
+        //
+        // 단, 두 드럼이 모두 같은 팔 쪽 바깥(몸 중심에서 OUTER_Y 이상, 예:
+        // 하이햇→크래쉬, 라이드↔플로어탐)이면 중앙 쪽 중립까지 들어갔다
+        // 다시 나오는 V자 우회가 된다(사용자 지적: "하이햇에서 크래쉬 갈 때
+        // 안쪽으로 들어오는 게 어색" — 실측 안쪽으로 최대 34cm). 이때만
+        // B 쪽으로 크게(0.8) 기울여 14cm로 줄인다. 1.0(B 바로 위 대기)이면
+        // 5cm지만 쉬는 동안 이미 타격 준비 자세로 보여 0.8로 절충.
+        const OUTER_Y = 0.3;
+        const armSign = arm === 'L' ? 1 : -1;
+        const bothOuter = drum.pos.y * armSign >= OUTER_Y && next.drum.pos.y * armSign >= OUTER_Y;
+        const HOLD_BIAS = bothOuter ? 0.8 : 0.3;
         const neutralHoldPose = useNeutralHold ? (() => {
           const p = {};
           sideKeys.forEach(k => {
@@ -2583,7 +2601,43 @@ function buildKeyframes() {
           return p;
         })() : null;
 
-        addPose(poseMap, peakT, useNeutralHold ? neutralHoldPose : peak, sideKeys);
+        // ── 다른 드럼으로 넘어갈 때: 타격 직후 먼저 수직으로 뽑아낸다 ──
+        // 예전엔 strike(A)에서 곧장 peak/중립 자세로 가서, 들어올 때(raise→
+        // strike, 손목만 꺾는 수직 스윙)와 달리 나갈 때는 타격 직후부터 몸
+        // 안쪽으로 비스듬히 빠졌다(사용자 지적: 라이드→스네어 호가 스네어→
+        // 라이드보다 작아 보임 — 실측 라이드 위 20cm 지점 옆 오프셋 도착
+        // 3cm vs 출발 7cm). rebound(J1~J6은 strike 그대로, 손목만 든 자세)를
+        // 한 번 거치면 출발도 도착과 대칭인 수직 호가 된다(출발 3cm).
+        // 같은 드럼 연타는 peak 자체가 그 드럼 바로 위라 손대지 않는다.
+        //
+        // 중립 대기로 쉬는 공백(useNeutralHold)은 더 심했다 — 타격 후
+        // 0.166초 만에 중립 자세까지 직선으로 당겨져(스틱 끝 74cm 이동)
+        // 하이햇→크래쉬 하단, 플로어탐→라이드 하단을 스쳤다(시뮬 실측 간격
+        // 0cm, 오프라인 실물에서도 같은 현상 보고). rebound까지 rebDur로
+        // 뽑은 뒤 RETURN_DUR에 걸쳐 천천히 중립으로 돌아가게 하고(간격
+        // 0→6cm, 0→14cm), 중립에서 raise(B)로 들어가는 스냅도 preDur*0.4
+        // (0.066초 — 스틱 끝이 옆으로 30cm 순간이동하듯 보였음)에서
+        // SNAP_DUR로 늘렸다(스틱 끝 최고속도 6.9→3.3m/s). 공백이 짧으면
+        // 둘 다 남는 시간의 45%씩으로 줄어든다.
+        const RETURN_DUR = 0.35, SNAP_DUR = 0.30;
+        // raiseBT는 아래에서 다시 계산되지만 중립 대기 구간 배분에 미리 필요하다.
+        const raiseBTEarly = next.t - Math.min(preDur, (next.t - peakT) * 0.7);
+        let holdStartT = peakT;
+        let snapDur = preDur * 0.4;
+        if (!sameDrum) {
+          const rebound = computeStrikePose(drum, 'rebound', vel);
+          if (useNeutralHold) {
+            const liftT = t + typeInfo.rebDur;
+            const avail = raiseBTEarly - liftT;
+            snapDur = Math.min(SNAP_DUR, avail * 0.45);
+            addPose(poseMap, parseFloat(liftT.toFixed(3)), rebound, sideKeys);
+            holdStartT = parseFloat((liftT + Math.min(RETURN_DUR, avail * 0.45)).toFixed(3));
+          } else {
+            const liftT = parseFloat(((t + peakT) / 2).toFixed(3));
+            if (liftT > t + 0.02) addPose(poseMap, liftT, rebound, sideKeys);
+          }
+        }
+        addPose(poseMap, holdStartT, useNeutralHold ? neutralHoldPose : peak, sideKeys);
 
         // 피크 이후 다음 타격 직전까지 남는 시간 안에서 raise(B)를 한 번 더 찍는다.
         // 이렇게 하면 다른 드럼으로 넘어갈 때도 마지막 진입 구간만큼은 J1~J6 고정 +
@@ -2603,20 +2657,21 @@ function buildKeyframes() {
           // 꺾인 것. peak 경유를 생략하고 중립에서 곧장 raise(B)로 가면
           // catmull-rom이 한 번에 자연스러운 호를 그린다(사용자 제안:
           // "최상단에서 다음 타격 쪽으로 각도를 가져가면 Y자가 사라진다").
-          // 스냅 구간을 preDur의 절반 정도로 짧게 잡아야 catmull-rom 보간이
+          // 스냅 구간 길이(snapDur)는 위 "수직으로 뽑아낸다" 주석 참고. 예전엔
+          // preDur*0.4로 짧게 잡았다 — catmull-rom 보간이
           // (다음 키프레임의 큰 변화를 미리 반영해) 중립 홀드 구간까지 앞당겨
           // 서서히 움직이기 시작하는 것을 최소화한다.
-          const snapT = parseFloat(Math.max(peakT, raiseBT - preDur * 0.4).toFixed(3));
+          const snapT = parseFloat(Math.max(holdStartT, raiseBT - snapDur).toFixed(3));
           // addBreathingHold는 홀드 구간이 BREATH_HALF(0.9초)보다 짧으면 점을
           // 하나도 안 찍는다 — 그러면 홀드 구간에 점이 peakT 하나뿐이라
           // catmull-rom이 앞뒤(타격 자세·raise(B) 자세)의 큰 변화를 반영해
           // 접선을 기울여서, 홀드 구간 내내 서서히 움직이는 것처럼 보인다
           // (실측 확인). 홀드 구간 중간에 같은 자세를 한 번 더 찍어 접선을
           // 평평하게 고정한다.
-          if (snapT > peakT) {
-            const midT = parseFloat(((peakT + snapT) / 2).toFixed(3));
-            if (midT > peakT && midT < snapT) addPose(poseMap, midT, neutralHoldPose, sideKeys);
-            addBreathingHold(poseMap, neutralHoldPose, peakT, snapT, sideKeys);
+          if (snapT > holdStartT) {
+            const midT = parseFloat(((holdStartT + snapT) / 2).toFixed(3));
+            if (midT > holdStartT && midT < snapT) addPose(poseMap, midT, neutralHoldPose, sideKeys);
+            addBreathingHold(poseMap, neutralHoldPose, holdStartT, snapT, sideKeys);
             addPose(poseMap, snapT, neutralHoldPose, sideKeys);
           }
         } else {
